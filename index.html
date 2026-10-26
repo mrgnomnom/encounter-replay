@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Encounter Replay</title>
+</head>
+<body>
+  <header>
+    <h1>Encounter Replay</h1>
+    <span class="meta" id="meta">No session loaded</span>
+    <select id="recordings" title="Recordings in Encounter Recorder's sessions folder, newest first"><option value="">Recordings…</option></select>
+    <button id="openSession" title="Open a session file. The dialog remembers the sessions folder once you've opened from it; the first time, its path is on your clipboard: Ctrl+L, Ctrl+V, Enter">Open session…</button>
+    <input type="file" id="file" accept=".jsonl,.json,.txt" hidden>
+  </header>
+  <main>
+    <div class="resizer side" id="sideResizer" title="Drag to resize the side panel"></div>
+    <div id="view">
+      <div id="viewControls">
+        <label title="Who the camera follows and the log is about">Follow <select id="followWho"><option value="me">you</option></select></label>
+        <label title="Keep the camera on them. Panning lets go; tick to come back"><input type="checkbox" id="follow" checked> camera</label>
+        <label><input type="checkbox" id="smooth" checked> Smooth</label>
+        <label title="Objects listed when an instance loads. Objects that mechanics spawn always show."><input type="checkbox" id="scenery" checked> Map objects</label>
+        <label title="The recorded collision map: walls and blocked tiles"><input type="checkbox" id="collision" checked> Collision</label>
+        <label title="Animation and graphic IDs over heads, and names, animations and ages over objects mechanics spawn"><input type="checkbox" id="labels" checked> Debug labels</label>
+        <span class="muted" id="bundleStatus"></span>
+        <span class="muted">Drag to orbit · right-drag to pan · scroll to zoom</span>
+      </div>
+      <div id="drop">Pick a recording from <b>Recordings…</b> or <b>Open session…</b>,<br>or drop a .jsonl session here</div>
+    </div>
+    <aside id="aside">
+      <div class="orbs" id="orbs">
+        <div class="orb" id="orbHp"><b>–</b><span>HP</span></div>
+        <div class="orb" id="orbPray"><b>–</b><span>Prayer</span></div>
+        <div class="orb" id="orbRun"><b>–</b><span>Run</span></div>
+        <div class="orb" id="orbSpec"><b>–</b><span>Spec</span></div>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="panelTitle" id="panelTitle"><span id="panelName">Inventory</span></div>
+      <label class="follow-tab"><input type="checkbox" id="followTab" checked> follow the tab open in game</label>
+      <label class="follow-tab"><input type="checkbox" id="accuracy" disabled> click accuracy</label>
+      <div id="panel"></div>
+      <div class="panelTitle"><span>Clicks this tick</span><span id="clickCount"></span></div>
+      <canvas id="screen" width="240" height="140"></canvas>
+      <div class="clicks" id="clicks"></div>
+    </aside>
+  </main>
+  <footer>
+    <div class="resizer bottom" id="footResizer" title="Drag to resize the bottom panel"></div>
+    <div class="transport">
+      <button id="prev" title="Previous tick (←)">◀</button>
+      <button id="play" title="Play / pause (space)">▶ Play</button>
+      <button id="next" title="Next tick (→)">▶</button>
+      <select id="speed">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+      </select>
+      <span class="tick" id="tickLabel">tick – / –</span>
+      <label title="Untick to see everything that happened, while still following"><input type="checkbox" id="logFilter" checked> only lines about <span id="filterWho">you</span></label>
+      <label><input type="checkbox" id="showVars"> varbits in log</label>
+      <span class="legend" title="What the marks on the timeline mean">
+        <span title="Hits on whoever you follow"><i style="background:#f0604f"></i>hit</span>
+        <span title="NPC animations"><i style="background:#3cc0a8"></i>NPC anim</span>
+        <span title="Your markers"><i style="background:#b08cf0"></i>marker</span>
+        <span title="Along the top: clicks that missed the server's cut-off and landed a tick late"><i class="top" style="background:#f1c40f"></i>late</span>
+        <span title="Along the top: clicks the game held for several ticks"><i class="top" style="background:#6fa0ea"></i>held</span>
+        <span title="Along the top: clicks the server never acted on"><i class="top" style="background:#ffffff"></i>ignored</span>
+      </span>
+    </div>
+    <div class="timeline-wrap" id="timelineWrap">
+      <canvas id="timeline" title="Click to jump, drag to zoom into a stretch, drag the playhead to scrub"></canvas>
+      <div id="timelineSel" class="timeline-sel" hidden></div>
+      <span id="zoomLabel" class="zoom-label" hidden></span>
+      <div id="timelineTip" class="timeline-tip" hidden></div>
+      <button id="zoomReset" class="zoom-reset" title="Show the whole recording (Esc)" hidden>×</button>
+    </div>
+    <div id="log"></div>
+  </footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

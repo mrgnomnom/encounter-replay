@@ -1,0 +1,26 @@
+{
+  "name": "encounter-replay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Replays Encounter Recorder sessions in 3D, tick by tick",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "audit": "vite-node scripts/audit.ts"
+  },
+  "dependencies": {
+    "gl-matrix": "^3.4.3",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/three": "^0.170.0",
+    "happy-dom": "^15.11.7",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

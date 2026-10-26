@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# Models and terrain exported from the game cache are Jagex's: they stay on this machine
+assets/cache/
+*.log
+# Your own recordings, for opening with ?session=sessions/<file>.jsonl
+sessions/
+# The exporter build, including its copy of the game cache
+exporter/build/
+exporter/.gradle/
