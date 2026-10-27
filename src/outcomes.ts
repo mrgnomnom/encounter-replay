@@ -56,6 +56,18 @@ const INVENTORY_INTERFACE = 149;
  */
 const LATE_MARGIN_CYCLES = 10;
 
+// Clicks that send you somewhere: walking, or using something in the world, which walks you to it first
+const MOVES = /^(WALK|NPC_|GAME_OBJECT_|PLAYER_|GROUND_ITEM_)/;
+
+/**
+ * The later click in the same tick that replaced a walk click: the game acts on the last of a tick's
+ * clicks that send you somewhere, so an earlier walk never happens
+ */
+export function walkReplacedBy(tickClicks: Line[], click: Line): Line | undefined {
+  if (click.action !== "WALK" || click.consumed) return undefined;
+  return tickClicks.find((o) => o.e === "click" && o.t === click.t && o.c > click.c && !o.consumed && MOVES.test(o.action ?? ""));
+}
+
 export function clickOutcomes(session: Session): Outcome[] {
   const worn: Line[] = [];
   const inv: Line[] = [];
@@ -76,6 +88,11 @@ export function clickOutcomes(session: Session): Outcome[] {
       o.widget?.[1] === click.widget?.[1] && o.target === click.target && o.option !== click.option);
     if (later && (click.option === "Activate" || click.option === "Deactivate")) {
       out.push({ click, status: "superseded", intent: `${describe(click)} (undone by ${later.option.toLowerCase()} in the same tick)` });
+      continue;
+    }
+    const replacing = walkReplacedBy(clicks, click);
+    if (replacing) {
+      out.push({ click, status: "superseded", intent: `${describe(click)} (replaced by your next click, ${describe(replacing)}, in the same tick)` });
       continue;
     }
     const o = follow(session, click, worn, inv, targets);

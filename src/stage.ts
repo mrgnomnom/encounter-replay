@@ -10,6 +10,7 @@ import { actorsAt, cycleAt, happened, recent, type ActorFrame } from "./moment";
 import { projectileAt, type Flight, type Vec3 } from "./projectile";
 import { latestAtOrBefore, refKey, type Line, type Ref, type Session } from "./session";
 import { toThree, type World } from "./world";
+import { walkReplacedBy } from "./outcomes";
 
 /**
  * Everything that moves: actors, projectiles, graphics on tiles and click markers. With a cache bundle
@@ -20,6 +21,9 @@ import { toThree, type World } from "./world";
 const COLORS = { me: 0x3ccf7a, npc: 0xf0a531, player: 0x6fa0ea };
 const PROJECTILE_COLOR = 0xf05fa0;
 const GFX_COLOR = 0xb08cf0;
+// The game's yellow click cross; a walk a later click replaced is greyed out
+const CROSS_COLOR = 0xf1c40f;
+const REPLACED_CROSS_COLOR = 0x9a958b;
 // Overhead text stays up for about five ticks in game
 const SAY_TICKS = 5;
 // How long a hitsplat stays when the line has no disappear cycle: about a tick
@@ -750,9 +754,11 @@ export class Stage {
     this.flag.visible = !!dest;
     if (dest) toThree(dest.sx + 0.5, dest.sy + 0.5, world.groundAt(dest.sx + 0.5, dest.sy + 0.5), this.flag.position);
 
-    // Walk clicks: a yellow cross where the walk took you (or, from format 4, the tile clicked)
+    // Walk clicks: a yellow cross where the walk took you (or, from format 4, the tile clicked). One a later
+    // click in the same tick replaced is dimmed: the flag shows where you actually went
     let used = 0;
-    for (const c of session.events(t)) {
+    const events = session.events(t);
+    for (const c of events) {
       if (c.e !== "click" || c.action !== "WALK") continue;
       const to = walkTile(session, c);
       if (!to) continue;
@@ -760,7 +766,7 @@ export class Stage {
       if (!cross) {
         cross = new THREE.Group();
         // Drawn over everything, so floors and objects at the same height can't hide it
-        const material = new THREE.MeshBasicMaterial({ color: 0xf1c40f, depthTest: false, transparent: true });
+        const material = new THREE.MeshBasicMaterial({ color: CROSS_COLOR, depthTest: false, transparent: true });
         for (const angle of [Math.PI / 4, -Math.PI / 4]) {
           const bar = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.02, 0.08), material);
           bar.rotation.y = angle;
@@ -771,6 +777,10 @@ export class Stage {
         this.group.add(cross);
       }
       cross.visible = true;
+      const replaced = !!walkReplacedBy(events, c);
+      const material = (cross.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
+      material.color.setHex(replaced ? REPLACED_CROSS_COLOR : CROSS_COLOR);
+      material.opacity = replaced ? 0.45 : 1;
       toThree(to.sx + 0.5, to.sy + 0.5, world.groundAt(to.sx + 0.5, to.sy + 0.5) + 0.04, cross.position);
       // The hovered walk click's cross pulses in size
       const hovered = this.targets.some((x) => x.kind === "tile" && x.walk && x.sx === to.sx && x.sy === to.sy);

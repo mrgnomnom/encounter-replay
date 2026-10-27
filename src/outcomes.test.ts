@@ -65,3 +65,31 @@ describe("clickOutcomes", () => {
     expect(by("Fire cape").status).toBe("cancelled");
   });
 });
+
+describe("walk clicks", () => {
+  const walk = (t: number, c: number, sx: number) => ({ t, c, e: "click", option: "Walk here", target: "", action: "WALK", tile: { sx, sy: 50 } });
+  const walking = Session.parse(
+    [
+      tick(0, []),
+      walk(1, 110, 53),
+      walk(1, 123, 54),
+      { t: 1, c: 125, e: "click", option: "Activate", target: "Piety", action: "CC_OP", widget: [541, 20] },
+      tick(1, []),
+      walk(2, 140, 55),
+      { t: 2, c: 150, e: "click", option: "Attack", target: "Guardian", action: "NPC_SECOND_OPTION" },
+      tick(2, []),
+    ].map((l) => JSON.stringify(l)).join("\n"),
+  );
+  const outcomes = clickOutcomes(walking);
+  const statusOf = (c: number) => outcomes.find((o) => o.click.c === c)?.status;
+
+  it("marks a walk a later walk in the same tick replaced, and not the one that won", () => {
+    expect(statusOf(110)).toBe("superseded");
+    expect(statusOf(123)).not.toBe("superseded");
+  });
+
+  it("counts clicking something in the world as replacing a walk, but not a prayer", () => {
+    expect(statusOf(140)).toBe("superseded");
+    expect(outcomes.find((o) => o.click.c === 110)?.intent).toContain("Walk here, in the same tick");
+  });
+});
