@@ -7,7 +7,7 @@ overhead text, and the side panel, clicks and prayers as they were in game.
 ## Using it
 
 1. Record something with the Encounter Recorder RuneLite plugin.
-2. Click **Open replay** in the plugin's panel, or open the replay page yourself.
+2. Click **Open replay** in the plugin's panel, or open https://encounter-replay.pages.dev yourself.
 3. The first time, click **Connect RuneLite folders** and pick the two folders it asks for. After that,
    your recordings are listed under **Recordings…** and open with the game's own models.
 
@@ -56,7 +56,8 @@ http://127.0.0.1:5180/?demo&t=15.6
 `?devCache=inline` builds models from the exporter's cache copy (`exporter/build/cache-live`) on the
 page, which is how headless screenshots test it. `npm test` runs the tests, `npm run typecheck` the type
 checker and `npm run build` a static build in `dist/`, followed by `scripts/check-dist.ts`, which fails
-if anything that must never be published (game data, recordings) ended up there. The project is on a
+if anything that must never be published (game data, recordings) ended up there. `npm run deploy` builds
+and publishes it to Cloudflare Pages (after `npx wrangler login`). The project is on a
 Windows drive, so from WSL the dev server polls for file changes.
 
 ## How it works

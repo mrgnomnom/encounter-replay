@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "audit": "vite-node scripts/audit.ts",
-    "parity": "vite-node scripts/parity.ts"
+    "parity": "vite-node scripts/parity.ts",
+    "deploy": "npm run build && npx wrangler pages deploy dist --project-name encounter-replay --branch main"
   },
   "dependencies": {
     "fflate": "^0.8.2",
