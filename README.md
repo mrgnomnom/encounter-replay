@@ -2,7 +2,9 @@
 
 **Watch your Old School RuneScape fights again, tick by tick, in 3D.**
 
-![Stepping through a recording](docs/images/replay.gif)
+![A 5-man Fractured Archive raid against Ocellus, played back tick by tick](docs/images/bossing.webp)
+
+*Bossing: a 5-man Fractured Archive raid, switching who to follow, with player names hidden.*
 
 ## Why
 
@@ -22,7 +24,9 @@ https://encounter-replay.pages.dev:
 You can scrub to any moment, play at a quarter speed, and follow any player. Boss fights, raids, PvP,
 a skilling trip: anything you can see in game, you can watch again.
 
-![A Moia fight from a 5-man Fractured Archive raid, paused on tick 816](docs/images/moia.png)
+![A PK fight played back tick by tick](docs/images/pvp.webp)
+
+*PvP: a one-on-one PK fight, with your gear switches, prayers and clicks as they happened.*
 
 ## Your files never leave your computer
 
