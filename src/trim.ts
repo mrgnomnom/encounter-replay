@@ -1,8 +1,8 @@
 /**
  * Cutting a recording down to a span of ticks for sharing: renumbered to start at 0, with whatever the
  * replay needs from before the span carried in at its start (the map, definitions, who's present and how
- * they look, your inventory, stats, varbits and open interfaces, and items on the ground). Players can be
- * renamed on the way. Used by the page's Export and by scripts/trim-session.ts.
+ * they look, your inventory, stats, varbits and open interfaces, an instance's objects and items on the
+ * ground). Players can be renamed on the way. Used by the page's Export and by scripts/trim-session.ts.
  */
 
 export type RawLine = Record<string, unknown> & { t: number; c: number; e: string };
@@ -40,14 +40,24 @@ function cut(lines: RawLine[], from: number, to: number): RawLine[] {
   const present = new Map<string, RawLine>();
   const openWidgets = new Map<unknown, RawLine>();
   const groundItems: RawLine[] = [];
+  // An instance's objects, listed when its map loads, plus those spawned since: placed object -> lines
+  const objects = new Map<string, RawLine[]>();
   let header: RawLine | undefined;
   let scene: RawLine | undefined;
   const itemKey = (l: RawLine) => `${l.id}@${l.x},${l.y},${l.p}`;
+  const objectKey = (l: RawLine) => `${l.id}@${l.x},${l.y},${l.pl ?? l.p}`;
   for (const l of before) {
     switch (l.e) {
       case "header": header = l; break;
-      case "scene": scene = l; groundItems.length = 0; break;
-      case "npcdef": case "itemdef": defs.push(l); break;
+      case "scene": scene = l; groundItems.length = 0; objects.clear(); break;
+      case "npcdef": case "itemdef": case "objdef": defs.push(l); break;
+      case "obj": {
+        const list = objects.get(objectKey(l));
+        if (list) list.push(l);
+        else objects.set(objectKey(l), [l]);
+        break;
+      }
+      case "obj_gone": objects.get(objectKey(l))?.shift(); break;
       case "npc_spawn": case "player_spawn": present.set(key(l.who), l); break;
       case "npc_gone": case "player_gone": present.delete(key(l.who)); break;
       case "look": case "moves": case "target": case "npc_changed": latest.set(`${l.e}:${key(l.who)}`, l); break;
@@ -70,11 +80,14 @@ function cut(lines: RawLine[], from: number, to: number): RawLine[] {
   }
   if (!header || !scene) throw new Error("The recording has no header or map load before the span");
   // Whoever's present at the start: their spawn, and the state lines that only make sense once they exist
+  const standing = new Set([...objects.values()].flat());
   const stillHere = (l: RawLine) => !l.who || (l.who as { k?: string }).k === "me" || present.has(key(l.who));
   const carried: RawLine[] = [
     { ...header, trimmed: { from, to, ticks: to - from } },
     scene,
     ...defs,
+    // In the order they were listed, as older recordings tell floors apart by it
+    ...before.filter((l) => standing.has(l)),
     ...present.values(),
     ...[...latest.values()].filter(stillHere),
     ...openWidgets.values(),
