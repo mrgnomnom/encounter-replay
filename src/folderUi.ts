@@ -27,6 +27,8 @@ export class FolderUi {
   private needPermission: Folders = {};
   /** The cache was connected as a whole folder before: that access was dropped, for its files instead */
   private upgraded = false;
+  /** The browser didn't give back access to every cache file in one go: they're to be chosen again */
+  private reask = false;
   private readonly landing = document.getElementById("landing") as HTMLElement;
   private readonly dialog = document.getElementById("folderDialog") as HTMLDialogElement;
   private readonly privacy = document.getElementById("privacyDialog") as HTMLDialogElement;
@@ -87,10 +89,22 @@ export class FolderUi {
       // Connected before: the browser only wants a click to allow it again
       const allow = el("button", "Allow access to the game cache", "primary big");
       allow.onclick = async () => {
-        if (!(await reconnect(again))) return;
-        this.cacheConnected(again);
+        if (await reconnect(again)) {
+          this.cacheConnected(again);
+          return;
+        }
+        // Rather than one prompt per file, which some browsers would need: choose them again, in one dialog
+        delete this.needPermission.cache;
+        this.reask = true;
+        this.showLanding();
       };
-      card.append(el("h2", "Welcome back"), el("p", "Your browser asks once per visit before the replay may read the game cache again."), allow, error);
+      card.append(
+        el("h2", "Welcome back"),
+        el("p", "Your browser asks before the replay may read the game cache again."),
+        allow,
+        el("p", "In Chrome, choose “Allow on every visit” when it asks, and it won't ask again.", "muted"),
+        error,
+      );
     } else {
       const choose = el("button", "Choose files…", "primary big");
       choose.onclick = async () => {
@@ -111,6 +125,7 @@ export class FolderUi {
       );
       const why = "Only the game's own files (main_file_cache) are listed: the page never gets the rest of that folder, which can hold your game settings and a remembered username.";
       card.append(el("h2", "One-time Game Cache Setup"), el("p", "This allows us to render the game properly", "muted"));
+      if (this.reask) card.append(el("p", "Your browser didn't give back access to all of the game cache's files, so please choose them again: it's one dialog. In Chrome, choosing “Allow on every visit” next time skips this.", "landing-note"));
       if (this.upgraded) card.append(el("p", "The page now asks for just the game cache's files instead of its whole folder, so it can't even see anything else in there. Please choose them once more.", "landing-note"));
       card.append(steps, el("p", why, "muted"));
     }
@@ -128,6 +143,7 @@ export class FolderUi {
   private cacheConnected(files: FileSystemFileHandle[]): void {
     this.folders.cache = files;
     this.upgraded = false;
+    this.reask = false;
     delete this.needPermission.cache;
     this.hideLanding();
     this.refreshButton();

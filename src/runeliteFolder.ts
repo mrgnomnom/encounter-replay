@@ -132,13 +132,22 @@ export async function rememberedFolders(): Promise<{ ready: Folders; needPermiss
 }
 
 /** Asks again for permission to read what was connected before: needs a click */
+/**
+ * Asks once. Chrome's prompt for a returning site lists everything it had before and restores it all
+ * (and offers "Allow on every visit"); browsers without it would ask file by file, each needing a click
+ * of its own, so if one prompt doesn't bring everything back this gives up rather than asking again
+ */
 export async function reconnect(what: FileSystemDirectoryHandle | FileSystemFileHandle[]): Promise<boolean> {
-  for (const h of Array.isArray(what) ? what : [what]) {
-    if ((await permission(h)) === "granted") continue;
-    // The browser's prompt restores everything the page had before, so this usually asks once
-    if ((await (h as unknown as Permissioned).requestPermission({ mode: "read" })) !== "granted") return false;
+  const handles = Array.isArray(what) ? what : [what];
+  try {
+    const waiting: FileSystemHandle[] = [];
+    for (const h of handles) if ((await permission(h)) !== "granted") waiting.push(h);
+    if (waiting.length && (await (waiting[0] as unknown as Permissioned).requestPermission({ mode: "read" })) !== "granted") return false;
+    for (const h of handles) if ((await permission(h)) !== "granted") return false;
+    return true;
+  } catch {
+    return false;
   }
-  return true;
 }
 
 /** Forgets both: the browser no longer lets the page read them */
