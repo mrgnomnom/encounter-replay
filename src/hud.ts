@@ -8,6 +8,11 @@ import { pendingAt, type Outcome, type OutcomeStatus } from "./outcomes";
 import { effectsOfActor, refOfKey, relatesTo } from "./relevance";
 import { refKey, stoppedTargeting, type Line, type Session } from "./session";
 
+const PRAYER_INTERFACE = 541;
+// The game's heal hitsplat, which isn't damage taken
+const HEAL_HITSPLAT = 6;
+const MAX_TICK_CHIPS = 12;
+
 /**
  * The interface around the 3D view: orbs, the side panel as it was in game, this tick's clicks,
  * the timeline and the event log.
@@ -94,6 +99,7 @@ export class Hud {
       const b = document.createElement("button");
       b.textContent = label;
       b.title = TAB_NAMES[i];
+      b.dataset.tab = String(i);
       b.onclick = () => {
         this.followTab = false;
         ($("followTab") as HTMLInputElement).checked = false;
@@ -117,9 +123,66 @@ export class Hud {
     this.accuracyPoints = points;
     const box = $<HTMLInputElement>("accuracy");
     box.disabled = !points;
-    box.parentElement!.title = points ? "Every click of the session on its button: green hits, red misses"
+    box.parentElement!.title = points ? "Your clicks in the timeline's stretch, on their buttons: green hits, red misses"
       : "Needs a recording from the updated recorder (format 4), which records where each button was";
-    this.gameUi.accuracy = points && box.checked ? points : undefined;
+    this.updateAccuracy();
+  }
+
+  /** The accuracy view keeps to the timeline's stretch: the zoomed part, or the whole recording */
+  private updateAccuracy(): void {
+    const points = this.accuracyPoints;
+    if (!points || !$<HTMLInputElement>("accuracy").checked || !this.session) {
+      this.gameUi.accuracy = undefined;
+      return;
+    }
+    const [from, to] = this.range(this.session);
+    this.gameUi.accuracy = points.filter((p) => p.t >= from && p.t <= to);
+  }
+
+  /** Jumps to a tick, for the summary's links; set by the page */
+  onJump: (t: number) => void = () => {};
+
+  /** What went on in the timeline's stretch: damage you took, and prayer and gear switches that landed late */
+  private summary(session: Session): void {
+    const [from, to] = this.range(session);
+    $("summaryTitle").textContent = this.zoom ? `Ticks ${from}–${to}` : "Whole recording";
+    const box = $("windowSummary");
+    box.replaceChildren();
+    let damage = 0;
+    let hits = 0;
+    for (let t = from; t <= to; t++) {
+      for (const l of session.events(t)) {
+        if (l.e !== "hit" || !l.who || refKey(l.who) !== "me" || l.type === HEAL_HITSPLAT) continue;
+        damage += l.amount ?? 0;
+        if (l.amount > 0) hits++;
+      }
+    }
+    const late = this.outcomes.filter((o) => o.status === "late" && o.click.t >= from && o.click.t <= to);
+    const prayer = late.filter((o) => o.click.widget?.[0] === PRAYER_INTERFACE);
+    const gear = late.filter((o) => ["Wear", "Wield", "Equip"].includes(o.click.option));
+    const row = (label: string, value: string, help: string, items: Outcome[] = []) => {
+      const r = div("summary-row");
+      r.title = help;
+      r.append(span("label", label), span(value === "0" ? "value none" : "value", value));
+      box.appendChild(r);
+      if (!items.length) return;
+      const list = div("summary-ticks");
+      for (const o of items.slice(0, MAX_TICK_CHIPS)) {
+        const b = document.createElement("button");
+        b.className = "tick-chip";
+        b.textContent = `${o.click.t}`;
+        b.title = `Tick ${o.click.t}: ${o.intent}, clicked ${(o.margin ?? 0) * 20} ms before the tick ended`;
+        b.onclick = () => this.onJump(o.click.t);
+        list.appendChild(b);
+      }
+      // A long recording can have dozens: the rest are a drag across the timeline away
+      if (items.length > MAX_TICK_CHIPS) list.appendChild(span("more", `+${items.length - MAX_TICK_CHIPS} more · zoom in to see them`));
+      box.appendChild(list);
+    };
+    row("Damage taken", `${damage}`, "Damage on your hitsplats in this stretch", []);
+    if (hits) box.lastElementChild!.appendChild(span("sub", ` in ${hits} hit${hits === 1 ? "" : "s"}`));
+    row("Late prayer switches", `${prayer.length}`, "Prayer clicks that missed the tick's cut-off and landed a tick later. Click a tick to jump to it", prayer);
+    row("Late gear switches", `${gear.length}`, "Equip clicks that missed the tick's cut-off and landed a tick later. Click a tick to jump to it", gear);
   }
 
   /** Shows a side panel tab regardless of the one open in game */
@@ -226,7 +289,7 @@ export class Hud {
       list.appendChild(d);
     }
     if (!clicks.length) list.appendChild(div("muted", "–"));
-    this.screen(session, clicks);
+    this.summary(session);
     this.log(session, t, showVars);
     $("tickLabel").textContent = `tick ${t} / ${session.lastTick} · ${(t * 0.6).toFixed(1)} s`;
   }
@@ -280,38 +343,6 @@ export class Hud {
       grid.appendChild(slot);
     }
     return grid;
-  }
-
-  private screen(session: Session, clicks: Line[]): void {
-    const c = $<HTMLCanvasElement>("screen");
-    const ctx = c.getContext("2d")!;
-    const W = session.header?.canvasW;
-    const H = session.header?.canvasH;
-    ctx.clearRect(0, 0, c.width, c.height);
-    ctx.strokeStyle = "#3a3732";
-    ctx.strokeRect(0.5, 0.5, c.width - 1, c.height - 1);
-    ctx.fillStyle = "#9a958b";
-    ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
-    if (!W || !H) {
-      ctx.fillText("Click positions need a format 2 session", 8, c.height / 2);
-      return;
-    }
-    const scale = Math.min((c.width - 2) / W, (c.height - 2) / H);
-    const ox = (c.width - W * scale) / 2;
-    const oy = (c.height - H * scale) / 2;
-    ctx.strokeRect(ox, oy, W * scale, H * scale);
-    for (const k of clicks) {
-      if (k.mx == null) continue;
-      const x = ox + k.mx * scale;
-      const y = oy + k.my * scale;
-      // Yellow for walking, red for everything else, like the game's own click crosses
-      ctx.strokeStyle = k.action === "WALK" ? "#f1c40f" : "#e74c3c";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
-      ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4);
-      ctx.stroke();
-    }
   }
 
   private lastShowVars = false;
@@ -411,6 +442,7 @@ export class Hud {
     const slot = this.hovered && (targetsOf(this.hovered, session).find((x) => x.kind === "slot") as Extract<Target, { kind: "slot" }> | undefined);
     // Hovering something in another tab shows that tab while the hover lasts
     const tab = slot ? slot.tab : this.viewTab;
+    this.updateAccuracy();
     this.gameUi.render(session, t, this.bundle, tab, gameTab, pendingAt(this.outcomes, t), thisTick, slot ?? undefined);
     const followed = this.followKey === "me" ? undefined : refOfKey(this.followKey, session, t);
     this.gameUi.warnNotFollowed(this.followKey === "me" ? undefined : followed ? session.label(followed, t) : "them");
@@ -427,6 +459,12 @@ export class Hud {
     const session = this.session;
     this.onHover(line && session ? targetsOf(line, session) : []);
     if (session) this.renderPanel(session, this.shownTick, session.tabAt(this.shownTick));
+  }
+
+  /** What the timeline shows, for exporting it */
+  view(session: Session): { from: number; to: number; zoomed: boolean } {
+    const [from, to] = this.range(session);
+    return { from, to: this.zoom ? to : session.lastTick, zoomed: !!this.zoom };
   }
 
   /** The ticks the timeline spans: the zoomed stretch, or the whole recording */
@@ -468,6 +506,9 @@ export class Hud {
     $("zoomLabel").hidden = !this.zoom;
     if (this.zoom) $("zoomLabel").textContent = `ticks ${this.zoom.from}–${this.zoom.to} (${((this.zoom.to - this.zoom.from) * 0.6).toFixed(1)} s)`;
     this.drawTimeline(session);
+    // The summary and the accuracy view follow the stretch
+    this.updateAccuracy();
+    this.onTabPicked();
   }
 
   drawTimeline(session: Session): void {
@@ -503,7 +544,8 @@ export class Hud {
       }
       if (anim) { ctx.fillStyle = ANIM_COLOR; ctx.fillRect(x(t), H * 0.62, tickW, H * 0.3); }
       if (hit) { ctx.fillStyle = "#f0604f"; ctx.fillRect(x(t), H * 0.3, Math.max(1.5 * dpr, tickW), H * 0.3); }
-      if (mark) { ctx.fillStyle = "#b08cf0"; ctx.fillRect(x(t) - dpr, 0, Math.max(3 * dpr, tickW), H); }
+      // Markers and notes: a thin line, so the tick's other marks stay readable when ticks are wide
+      if (mark) { ctx.fillStyle = "#b08cf0"; ctx.fillRect(x(t) + tickW / 2 - 1.5 * dpr, 0, 3 * dpr, H); }
       // Clicks the server took late or never acted on, along the top edge
       for (const o of this.outcomesByTick.get(t) ?? []) {
         const color = o.status === "late" ? "#f1c40f" : o.status === "delayed" ? "#6fa0ea" : o.status === "ignored" || o.status === "cancelled" ? "#ffffff" : null;
@@ -582,7 +624,7 @@ export function describe(session: Session, l: Line): string {
     case "ui_tab": return `side panel → ${TAB_NAMES[l.tab] ?? l.tab}`;
     case "look": return `${who(l.who)} appearance (combat ${l.cb ?? "?"})`;
     case "moves": return `${who(l.who)} movement anims ${l.anims.join(", ")}`;
-    case "mark": return `MARK: ${l.note}`;
+    case "mark": return `${l.by === "you" ? "NOTE" : "MARK"}: ${l.note || "(no note)"}`;
     case "widget_open": return `interface ${l.group} opened`;
     case "widget_close": return `interface ${l.group} closed`;
     case "death": return `${who(l.who)} died`;

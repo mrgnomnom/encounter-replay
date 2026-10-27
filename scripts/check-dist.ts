@@ -7,6 +7,8 @@ import { join, relative, resolve } from "node:path";
 
 const DIST = resolve(__dirname, "..", "dist");
 const FORBIDDEN = [/main_file_cache/i, /\.bundle\.json$/i, /\.jsonl$/i, /\.dat2?$/i, /\.idx\d+$/i, /^sessions\//, /^assets\/cache\//];
+// The demo recording that ships with the page: trimmed, with other players renamed (scripts/trim-session.ts)
+const ALLOWED = new Set(["demo/demo.jsonl"]);
 // The whole site is under 2 MB; a single file over this is something else
 const MAX_FILE = 3 * 1024 * 1024;
 
@@ -22,7 +24,7 @@ function walk(dir: string): void {
       continue;
     }
     total += stat.size;
-    if (FORBIDDEN.some((re) => re.test(rel))) problems.push(`${rel}: must never be published`);
+    if (FORBIDDEN.some((re) => re.test(rel)) && !ALLOWED.has(rel)) problems.push(`${rel}: must never be published`);
     else if (stat.size > MAX_FILE) problems.push(`${rel}: ${(stat.size / 1048576).toFixed(1)} MB is too big for this site`);
   }
 }

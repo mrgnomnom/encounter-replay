@@ -194,6 +194,7 @@ export class GameUi {
       const img = sprite(bundle, icon, x, y, panel, "tab");
       if (img) {
         img.title = TAB_NAMES[i] + (i === gameTab ? " (open in game)" : "");
+        img.dataset.tab = String(i);
         img.onclick = () => this.onTabPicked(i);
         if (i === gameTab && i !== viewTab) img.classList.add("game-open");
       }
@@ -210,7 +211,7 @@ export class GameUi {
     } else if (viewTab === 0 && this.combat(content, session, t, bundle)) {
       // Drawn from the cache's combat styles
     } else if (viewTab === 6) {
-      this.spellbook(content, session, t, bundle, ui?.spellbook ?? 0);
+      this.spellbook(content, bundle, ui?.spellbook ?? 0);
     } else {
       const note = el("div", "side-note", content);
       note.textContent = viewTab === 0 && ui ? `Attack style ${ui.style + 1}\nAuto retaliate ${ui.autoRetaliate ? "on" : "off"}\n\n(recordings from format 5 show\nthe combat options as in game)` : TAB_NAMES[viewTab];
@@ -220,7 +221,7 @@ export class GameUi {
       const s = spread(this.shownPoints);
       const summary = el("div", "acc-summary", root);
       summary.textContent = s.hits + s.misses
-        ? `${s.hits} clicks, ${s.misses} misses · on average ${Math.round(s.meanOffCentre * 100)}% of the way from centre to edge`
+        ? `${s.hits} click${s.hits === 1 ? "" : "s"}, ${s.misses} miss${s.misses === 1 ? "" : "es"} · on average ${Math.round(s.meanOffCentre * 100)}% of the way from centre to edge`
         : "No clicks on this tab yet";
     }
   }
@@ -312,22 +313,21 @@ export class GameUi {
   private readonly learnedTypes = new WeakMap<Session, { of(weapon: number, t: number): number | undefined }>();
 
   /**
-   * The spellbook for recordings that didn't snapshot it, from the cache's spell list. Lit or dim by
-   * magic level alone: the game also weighs runes, staves and quests, which aren't known here
+   * The spellbook for recordings that didn't snapshot it, from the cache's spell list. Every spell is drawn
+   * the same: which ones could be cast depends on runes, staves, quests and level, which aren't known here,
+   * so none is shown lit or dim
    */
-  private spellbook(content: HTMLElement, session: Session, t: number, bundle: Bundle, book: number): void {
+  private spellbook(content: HTMLElement, bundle: Bundle, book: number): void {
     const spells = bundle.spellbook(book);
     if (!spells.length) return;
-    const level = latestAtOrBefore(session.lines.filter((l) => l.e === "stat" && l.skill === "MAGIC"), t)?.boosted ?? 99;
     const cols = Math.ceil(Math.sqrt((spells.length * 190) / 245));
     const cell = Math.min(190 / cols, 245 / Math.ceil(spells.length / cols));
     spells.forEach((s, i) => {
-      const lit = level >= s.level;
-      const img = sprite(bundle, lit ? s.on : s.off, (i % cols) * cell + (cell - 24) / 2, Math.floor(i / cols) * cell + (cell - 24) / 2, content);
+      const img = sprite(bundle, s.on, (i % cols) * cell + (cell - 24) / 2, Math.floor(i / cols) * cell + (cell - 24) / 2, content);
       if (img) img.title = `${s.name} (level ${s.level})`;
     });
     const note = el("div", "spell-note", content);
-    note.textContent = "approximate: lit by magic level only";
+    note.textContent = "Which spells you could cast isn't in this recording";
   }
 
   private orb(row: HTMLElement, bundle: Bundle, value: number, fraction: number, filler: number, icon: number): void {

@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- The page may only load itself: no connection can carry your files anywhere (also sent as a header, see public/_headers) -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Encounter Replay</title>
+  <title>OSRS Encounter Replay</title>
 </head>
 <body>
   <header>
-    <h1>Encounter Replay</h1>
+    <h1>OSRS Encounter Replay</h1>
     <span class="meta" id="meta">No session loaded</span>
-    <button id="connectFolder" hidden title="Connect your recordings and the game cache, read-only, on this computer only">Connect RuneLite folders</button>
+    <button id="connectFolder" hidden title="Connect Encounter Recorder's recordings folder, view only, so your recordings are listed and the plugin's Open replay button works">Setup Default Recording Directory</button>
+    <button id="tutorialOpen" class="link" title="A one-minute tour of the replay, on the demo recording">Tutorial</button>
     <button id="privacyOpen" class="link" title="The folders this page can read, every file it has read, and why nothing leaves your computer">What this page can see</button>
     <select id="recordings" title="Recordings in Encounter Recorder's sessions folder, newest first"><option value="">Recordings…</option></select>
-    <button id="openSession" title="Open a recording file from anywhere on this computer">Open session…</button>
+    <button id="openSession" title="Open a recording file from anywhere on this computer">Import Recording</button>
     <input type="file" id="file" accept=".jsonl,.json,.txt" hidden>
   </header>
   <main>
@@ -28,9 +29,10 @@
         <label title="The recorded collision map: walls and blocked tiles"><input type="checkbox" id="collision" checked> Collision</label>
         <label title="Animation and graphic IDs over heads, and names, animations and ages over objects mechanics spawn"><input type="checkbox" id="labels" checked> Debug labels</label>
         <span class="muted" id="bundleStatus"></span>
-        <span class="muted">Drag to orbit · right-drag to pan · scroll to zoom</span>
+        <span class="muted">Drag or middle-drag to orbit · right-drag to pan · scroll to zoom</span>
       </div>
-      <div id="drop"><span>Pick a recording from <b>Recordings…</b> or <b>Open session…</b>,<br>or drop a .jsonl session here</span></div>
+      <div id="notes" class="notes"></div>
+      <div id="drop"><span>Drag and drop a recorded session here<br><button id="dropSetup" class="link">Or set a default recording directory</button></span></div>
     </div>
     <aside id="aside">
       <div class="orbs" id="orbs">
@@ -42,10 +44,11 @@
       <div class="tabs" id="tabs"></div>
       <div class="panelTitle" id="panelTitle"><span id="panelName">Inventory</span></div>
       <label class="follow-tab"><input type="checkbox" id="followTab" checked> follow the tab open in game</label>
-      <label class="follow-tab"><input type="checkbox" id="accuracy" disabled> click accuracy</label>
+      <label class="follow-tab"><input type="checkbox" id="accuracy" disabled> click accuracy in the timeline's stretch</label>
       <div id="panel"></div>
+      <div class="panelTitle"><span id="summaryTitle">Whole recording</span><span class="muted" title="Drag across the timeline to sum up a stretch of it; × or Esc goes back to the whole recording">drag the timeline to pick a stretch</span></div>
+      <div id="windowSummary" class="window-summary"></div>
       <div class="panelTitle"><span>Clicks this tick</span><span id="clickCount"></span></div>
-      <canvas id="screen" width="240" height="140"></canvas>
       <div class="clicks" id="clicks"></div>
     </aside>
   </main>
@@ -60,6 +63,8 @@
         <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
       </select>
       <span class="tick" id="tickLabel">tick – / –</span>
+      <button id="addNote" title="Add a note at the tick shown (N). Notes pop up on the map as playback passes them">＋ Note</button>
+      <button id="exportOpen" title="Download what the timeline shows, notes included, as a file to share. Drag across the timeline first to export just a stretch">Export…</button>
       <label title="Untick to see everything that happened, while still following"><input type="checkbox" id="logFilter" checked> only lines about <span id="filterWho">you</span></label>
       <label><input type="checkbox" id="showVars"> varbits in log</label>
       <span class="legend" title="What the marks on the timeline mean">
@@ -80,8 +85,10 @@
     </div>
     <div id="log"></div>
   </footer>
+  <div id="landing" hidden></div>
   <dialog id="folderDialog" class="panel-dialog"></dialog>
   <dialog id="privacyDialog" class="panel-dialog"></dialog>
+  <dialog id="exportDialog" class="panel-dialog"></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

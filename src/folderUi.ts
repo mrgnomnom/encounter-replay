@@ -2,12 +2,17 @@ import {
   FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickFolder, reconnect, rememberedFolders,
   type FolderKind, type Folders,
 } from "./runeliteFolder";
+import { kofiButton } from "./support";
 
 /**
- * Connecting the two folders the page reads, with what each holds said before the browser asks, and a
- * panel showing what the page can see: the folders, every file it has read, and why it can't send them
- * anywhere.
+ * Setting up the folders the page reads. First a landing page, with nothing else on screen, that walks
+ * through connecting the game cache step by step; then, from the replay, an optional default recordings
+ * directory. Each says what it holds before the browser asks. Also a panel showing what the page can
+ * see: the folders, every file it has read, and why it can't send them anywhere.
  */
+
+/** The recorder's page on the Plugin Hub, once it's there */
+export const PLUGIN_HUB_URL = "https://runelite.net/plugin-hub/show/encounter-recorder";
 
 const LABELS: Record<FolderKind, { title: string; holds: string }> = {
   sessions: { title: "Your recordings", holds: "Encounter Recorder's sessions folder: the recordings you made, nothing else." },
@@ -15,10 +20,12 @@ const LABELS: Record<FolderKind, { title: string; holds: string }> = {
 };
 
 const isWindows = () => /Win/.test(navigator.platform);
+const pathOf = (kind: FolderKind) => FOLDER_PATHS[kind][isWindows() ? "windows" : "other"];
 
 export class FolderUi {
   folders: Folders = {};
   private needPermission: Folders = {};
+  private readonly landing = document.getElementById("landing") as HTMLElement;
   private readonly dialog = document.getElementById("folderDialog") as HTMLDialogElement;
   private readonly privacy = document.getElementById("privacyDialog") as HTMLDialogElement;
   private readonly button = document.getElementById("connectFolder") as HTMLButtonElement;
@@ -31,78 +38,155 @@ export class FolderUi {
     this.refreshButton();
   }
 
-  async restore(): Promise<void> {
+  /** Picks up the folders connected before; until the game cache is connected, only the landing page shows */
+  async restore(skipLanding = false): Promise<void> {
+    // The landing page shows at once, so the replay never flashes up behind it while the browser looks
+    // up the folders it remembers
+    if (!skipLanding) this.showLanding();
     const { ready, needPermission } = await rememberedFolders();
     this.folders = ready;
     this.needPermission = needPermission;
     this.refreshButton();
+    if (skipLanding) return;
+    if (this.folders.cache) this.hideLanding();
+    else this.showLanding();
   }
 
-  /** The connect dialog, opened by the header button or when something needs a folder */
+  // ---------- the landing page: the game cache, step by step ----------
+
+  private showLanding(): void {
+    document.body.classList.add("landing-open");
+    this.landing.hidden = false;
+    const card = el("div", "", "landing-card");
+    const hub = el("p", "", "landing-hub");
+    const link = el("a", "Encounter Recorder on the RuneLite Plugin Hub");
+    link.href = PLUGIN_HUB_URL;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    hub.append("Record your fights with ", link, ".");
+    card.append(el("h1", "OSRS Encounter Replay", "osrs-title"), el("p", "Watch your fights back, tick by tick, with the game's own models.", "landing-lede"), hub);
+
+    if (!folderPickerSupported()) {
+      card.append(el("h2", "Use Chrome or Edge"), el("p", "The replay reads the game's files from your computer, which needs a Chromium browser: Chrome, Edge, Brave or Opera."));
+      this.landing.replaceChildren(card);
+      return;
+    }
+
+    const note = el("p", "", "landing-note");
+    const see = el("button", "Check what this page can see", "link");
+    see.onclick = () => this.showPrivacy();
+    note.append("This page can't change your files nor send them anywhere. Everything is local. ", see);
+    card.append(note);
+
+    const error = el("p", "", "error");
+    const again = this.needPermission.cache;
+    if (again) {
+      // Connected before: the browser only wants a click to allow it again
+      const allow = el("button", "Allow access to the game cache", "primary big");
+      allow.onclick = async () => {
+        if (!(await reconnect(again))) return;
+        this.cacheConnected(again);
+      };
+      card.append(el("h2", "Welcome back"), el("p", "Your browser asks once per visit before the replay may read the game cache again."), allow, error);
+    } else {
+      const choose = el("button", "Choose folder…", "primary big");
+      choose.onclick = async () => {
+        try {
+          this.cacheConnected(await pickFolder("cache"));
+        } catch (e) {
+          // Cancelling the picker isn't worth a message
+          if (!(e instanceof DOMException && e.name === "AbortError")) error.textContent = e instanceof Error ? e.message : String(e);
+        }
+      };
+      const steps = el("ol", "", "landing-steps");
+      steps.append(
+        step("Copy the game cache's location", copyField(pathOf("cache"))),
+        step(isWindows()
+          ? "Click Choose folder, paste the location into the address bar at the top of the window, press Enter, then click Select Folder"
+          : "Click Choose folder, press Cmd+Shift+G, paste the location, press Enter, then click Select", choose, error),
+        step("When the browser asks, click View files"),
+      );
+      card.append(el("h2", "One-time Game Cache Setup"), el("p", "This allows us to render the game properly", "muted"), steps);
+    }
+    // At the bottom of the screen, out of the way of the setup
+    const support = el("div", "", "landing-support");
+    support.append(el("span", "Enjoying it?", "muted"), kofiButton());
+    this.landing.replaceChildren(card, support);
+  }
+
+  private hideLanding(): void {
+    this.landing.hidden = true;
+    document.body.classList.remove("landing-open");
+  }
+
+  private cacheConnected(dir: FileSystemDirectoryHandle): void {
+    this.folders.cache = dir;
+    delete this.needPermission.cache;
+    this.hideLanding();
+    this.refreshButton();
+    this.changed("cache");
+  }
+
+  // ---------- the default recordings directory ----------
+
+  /** The recordings directory dialog, opened by the header button, the drop area, or a link to a recording */
   open(why?: string): void {
     if (!folderPickerSupported()) {
-      this.dialog.replaceChildren(el("h2", "Use Chrome or Edge"), el("p", "Reading your recordings and the game cache from your computer needs a Chromium browser: Chrome, Edge, Brave or Opera."), closeButton(this.dialog));
+      this.dialog.replaceChildren(el("h2", "Use Chrome or Edge"), el("p", "Reading your recordings from your computer needs a Chromium browser: Chrome, Edge, Brave or Opera. You can still drag a recording onto the page."), closeButton(this.dialog));
       this.dialog.showModal();
       return;
     }
-    const rows = (["sessions", "cache"] as const).map((kind) => this.row(kind));
+    const connected = !!this.folders.sessions;
+    const again = this.needPermission.sessions;
+    const error = el("p", "", "error");
+    const action = el("button", connected ? "Change folder…" : again ? "Allow again" : "Choose folder…", "primary");
+    action.onclick = async () => {
+      try {
+        if (again && !connected) {
+          if (!(await reconnect(again))) return;
+          this.folders.sessions = again;
+        } else {
+          this.folders.sessions = await pickFolder("sessions");
+        }
+        delete this.needPermission.sessions;
+        this.refreshButton();
+        this.changed("sessions");
+        this.dialog.close();
+      } catch (e) {
+        if (!(e instanceof DOMException && e.name === "AbortError")) error.textContent = e instanceof Error ? e.message : String(e);
+      }
+    };
+    const steps = el("ol", "", "landing-steps");
+    steps.append(
+      step("Copy the recordings folder's location", copyField(pathOf("sessions"))),
+      step(isWindows()
+        ? "Click Choose folder, paste the location into the address bar, press Enter, then click Select Folder"
+        : "Click Choose folder, press Cmd+Shift+G, paste the location, press Enter, then click Select", action, error),
+      step("When the browser asks, click View files"),
+    );
     this.dialog.replaceChildren(
-      el("h2", "Connect your RuneLite folders"),
+      el("h2", "Default recording directory"),
       ...(why ? [el("p", why, "why")] : []),
-      el("p", "The replay reads two folders on this computer. The browser will ask once for each, to view files only: it can't change them, and this page can't send them anywhere."),
-      ...rows,
-      el("p", "Not your .runelite folder itself: it also holds your logins, so the page turns it away.", "muted"),
-      closeButton(this.dialog, "Done"),
+      el("p", connected
+        ? `Connected: "${this.folders.sessions!.name}". Your recordings are listed under Recordings… and the plugin's Open replay button opens them directly.`
+        : "Set it once and your recordings are listed under Recordings…, and the plugin's Open replay button opens them directly. It holds only your recordings; the page can view them but not change them."),
+      steps,
+      closeButton(this.dialog, "Close"),
     );
     if (!this.dialog.open) this.dialog.showModal();
   }
 
-  private row(kind: FolderKind): HTMLElement {
-    const row = el("div", "", "folder-row");
-    const connected = !!this.folders[kind];
-    const path = FOLDER_PATHS[kind][isWindows() ? "windows" : "other"];
-    const head = el("div", "", "folder-head");
-    head.append(el("b", LABELS[kind].title), el("span", connected ? "✓ connected" : this.needPermission[kind] ? "needs your OK again" : "", connected ? "ok" : "muted"));
-    const where = el("div", "", "folder-path");
-    const code = el("code", path);
-    const copy = el("button", "Copy");
-    copy.title = isWindows() ? "Paste it into the folder picker's address bar" : "In the folder picker, press Cmd+Shift+G and paste it";
-    copy.onclick = () => void navigator.clipboard.writeText(path).then(() => (copy.textContent = "Copied"));
-    where.append(code, copy);
-    const action = el("button", connected ? "Change…" : this.needPermission[kind] ? "Allow again" : "Choose folder…", "primary");
-    const error = el("p", "", "error");
-    action.onclick = async () => {
-      try {
-        const again = this.needPermission[kind];
-        if (again && !connected) {
-          if (!(await reconnect(again))) return;
-          this.folders[kind] = again;
-        } else {
-          this.folders[kind] = await pickFolder(kind);
-        }
-        delete this.needPermission[kind];
-        this.refreshButton();
-        this.changed(kind);
-        this.open();
-      } catch (e) {
-        // Cancelling the picker isn't worth a message
-        if (!(e instanceof DOMException && e.name === "AbortError")) error.textContent = e instanceof Error ? e.message : String(e);
-      }
-    };
-    row.append(head, el("p", LABELS[kind].holds, "muted"), where, action, error);
-    return row;
-  }
-
   private refreshButton(): void {
-    const missing = !this.folders.sessions || !this.folders.cache;
-    this.button.hidden = !missing;
-    this.button.textContent = this.needPermission.sessions || this.needPermission.cache ? "Reconnect RuneLite folders" : "Connect RuneLite folders";
+    this.button.hidden = !!this.folders.sessions;
+    this.button.textContent = this.needPermission.sessions ? "Reconnect Recording Directory" : "Setup Default Recording Directory";
   }
 
-  /** What the page can see: the folders it was given, every file it has read, and what it can't do */
+  // ---------- what the page can see ----------
+
+  /** The folders it was given, every file it has read, and what it can't do */
   showPrivacy(): void {
     const folders = el("ul");
-    for (const kind of ["sessions", "cache"] as const) {
+    for (const kind of ["cache", "sessions"] as const) {
       const dir = this.folders[kind];
       folders.append(el("li", `${LABELS[kind].title}: ${dir ? `"${dir.name}" folder, view only` : "not connected"}`));
     }
@@ -116,7 +200,8 @@ export class FolderUi {
       this.folders = {};
       this.needPermission = {};
       this.refreshButton();
-      this.showPrivacy();
+      this.privacy.close();
+      this.showLanding();
     };
     this.privacy.replaceChildren(
       el("h2", "What this page can see"),
@@ -126,12 +211,27 @@ export class FolderUi {
       files,
       el("h3", "What it can't do"),
       el("p", "Send anything anywhere. The page's security policy tells your browser to block every connection except loading the page itself, so your recordings and files stay on this computer. You can check it in your browser's developer tools (Network tab), or unplug the internet: the replay keeps working."),
-      el("p", "No accounts, no cookies, no analytics. The source is public."),
+      el("p", "No accounts, no cookies, no analytics."),
       el("div", "", "dialog-buttons"),
     );
     this.privacy.lastElementChild!.append(forget, closeButton(this.privacy));
     if (!this.privacy.open) this.privacy.showModal();
   }
+}
+
+function step(text: string, ...extra: HTMLElement[]): HTMLLIElement {
+  const li = el("li");
+  li.append(el("span", text), ...extra);
+  return li;
+}
+
+/** A location to paste into the folder picker, with a copy button */
+function copyField(path: string): HTMLElement {
+  const where = el("div", "", "folder-path");
+  const copy = el("button", "Copy");
+  copy.onclick = () => void navigator.clipboard.writeText(path).then(() => (copy.textContent = "Copied ✓"));
+  where.append(el("code", path), copy);
+  return where;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", cls = ""): HTMLElementTagNameMap[K] {

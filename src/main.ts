@@ -17,8 +17,11 @@ import { GroundItemLayer } from "./groundItems";
 import { ObjectTimeline } from "./objects";
 import { Session } from "./session";
 import { Stage } from "./stage";
-import { syntheticSession } from "./synthetic";
 import { FolderUi } from "./folderUi";
+import { addSupport } from "./support";
+import { Tour, tutorialDone } from "./tutorial";
+import { Notes } from "./notes";
+import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { toThree, World } from "./world";
 
@@ -26,6 +29,7 @@ import { toThree, World } from "./world";
 const TICK_MS = 600;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const params = new URLSearchParams(location.search);
 
 const view = $("view");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -57,6 +61,8 @@ controls.maxPolarAngle = Math.PI * 0.47;
 // Panning slides the point the camera orbits along the floor. Panning in screen space would lift it into
 // the air or sink it underground, so the camera would zoom towards a point it isn't looking at
 controls.screenSpacePanning = false;
+// The middle button orbits too, like the left; the wheel zooms (below)
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
 controls.enableZoom = false;
 controls.target.set(52, 0, -52);
 
@@ -98,6 +104,26 @@ const itemLayer = new GroundItemLayer();
 scene.add(world.group, stage.group, objectLayer.group, itemLayer.group);
 
 const hud = new Hud(() => session && hud.showTick(session, clock.t, showVars()));
+// The summary's tick links jump there
+hud.onJump = (t) => seek(t);
+
+// Notes on ticks and markers, and exporting the timeline's view with them
+const notes = new Notes();
+const notesUi = new NotesUi(notes, {
+  tick: () => clock.t,
+  cycle: () => (session ? Math.floor(cycleAt(session, clock.t, clock.frac)) : 0),
+  range: () => (session ? hud.view(session) : { from: 0, to: 0, zoomed: false }),
+  changed() {
+    if (!session) return;
+    hud.drawTimeline(session);
+    hud.showTick(session, clock.t, showVars());
+  },
+  baseName: () => sessionBase || "recording",
+  pause() {
+    clock.playing = false;
+    updatePlay();
+  },
+});
 let session: Session | undefined;
 let objects: ObjectTimeline | undefined;
 let bundle: Bundle | undefined;
@@ -114,6 +140,8 @@ let sessionBase = "";
 function open(text: string, name: string): void {
   session = Session.parse(text);
   sessionText = text;
+  notes.load(session, text, name);
+  notesUi.reset();
   objects = new ObjectTimeline(session);
   hud.setOutcomes(clickOutcomes(session));
   hud.setAccuracy(hasAccuracyData(session) ? clickPoints(session) : undefined);
@@ -229,7 +257,8 @@ function useBundle(b: Bundle | undefined, base: string): void {
   $<HTMLInputElement>("labels").checked = !bundle;
   document.body.classList.toggle("no-object-labels", !!bundle);
   stage.debugLabels = !bundle;
-  $("bundleStatus").textContent = bundle ? "game models" : `no models: export assets/cache/${base}.bundle.json`;
+  // Once loaded, the scene speaks for itself: the status only says something while loading or when it failed
+  $("bundleStatus").textContent = bundle ? "" : import.meta.env.DEV ? `no models: export assets/cache/${base}.bundle.json` : "";
   // Which effects come with which animations, learned from this recording's repetitions
   const links = new EffectLinks(session, (anim) => (bundle ? lengthOf(bundle, anim) : undefined));
   stage.effectLinks = links;
@@ -368,6 +397,7 @@ function frame(now: number): void {
       sun.target.position.copy(target);
     }
     hud.drawCursor(session, clock.t + clock.frac);
+    notesUi.update();
     updateFilterLabel();
   }
   controls.update();
@@ -541,16 +571,60 @@ async function openWithPicker(): Promise<void> {
 const folderUi = new FolderUi((kind) => {
   if (kind === "sessions") void listRecordings().then(() => openFromHash());
   else if (session && !bundle && folderUi.folders.cache) void buildFromCache(folderUi.folders.cache);
+  // Arrived from the plugin's Open replay button: once the game cache is set up, open its recording;
+  // otherwise, the first time, the tutorial
+  else if (!openFromHash() && !tutorialDone()) void tour.start();
 });
+
+// The tutorial, on the demo recording that ships with the page
+const tour = new Tour({
+  async openDemo() {
+    const text = await (await fetch("demo/demo.jsonl")).text();
+    open(text, "demo.jsonl");
+  },
+  seek,
+  pause() {
+    clock.playing = false;
+    updatePlay();
+  },
+  follow(who) {
+    if (who === "me") return follow("me");
+    refreshFollowList(true);
+    const option = [...$<HTMLSelectElement>("followWho").options].find((o) => o.text.includes(who));
+    if (option) follow(option.value);
+  },
+  pickTab(tab) {
+    hud.pinTab(tab);
+    if (session) hud.showTick(session, clock.t, showVars());
+  },
+  followGameTab() {
+    const box = $<HTMLInputElement>("followTab");
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+  },
+  lateMark(t) {
+    if (!session) return undefined;
+    const r = timeline.getBoundingClientRect();
+    const x0 = hud.xOfTick(session, t);
+    const x1 = hud.xOfTick(session, t + 1);
+    return new DOMRect(x0, r.top, Math.max(8, x1 - x0), Math.max(10, r.height * 0.3));
+  },
+  importRecording: () => void openWithPicker(),
+  setDirectory: () => folderUi.open(),
+});
+$("tutorialOpen").onclick = () => void tour.start();
+$("dropSetup").onclick = () => folderUi.open();
+addSupport(document.querySelector("header")!);
 
 /** #session=<file> opens a recording from the connected folder: the recorder's Replay button links here */
 function openFromHash(): boolean {
   const name = new URLSearchParams(location.hash.slice(1)).get("session");
   if (!name || !/^[\w.-]+\.jsonl$/.test(name)) return false;
+  // The landing page sets up the game cache first
+  if (!folderUi.folders.cache) return false;
   const sessions = folderUi.folders.sessions;
   if (!sessions) {
-    $("drop").textContent = `Connect your recordings folder to open ${name}`;
-    folderUi.open(`To open ${name}, the replay needs your recordings folder${folderUi.folders.cache ? "" : " and the game cache"}.`);
+    folderUi.open(`To open ${name} from the plugin, the replay needs to know where your recordings are.`);
     return false;
   }
   history.replaceState(null, "", location.pathname + location.search);
@@ -603,9 +677,11 @@ $<HTMLSelectElement>("recordings").onchange = async (e) => {
   const text = sessions ? await readSession(sessions, name) : await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
   open(text, name);
 };
-void folderUi.restore().then(() => {
+// In development, ?session, ?demo, ?devCache and ?skipLanding open straight into the replay, past the landing page
+const skipLanding = import.meta.env.DEV && ["session", "demo", "devCache", "skipLanding", "tour"].some((p) => params.has(p));
+void folderUi.restore(skipLanding).then(() => {
   void listRecordings();
-  openFromHash();
+  if (!openFromHash() && folderUi.folders.cache && !skipLanding && !tutorialDone()) void tour.start();
 });
 
 // Files: the session is read in the page and never leaves it
@@ -692,9 +768,8 @@ dragEdge($("footResizer"), (e) => {
   if (session) hud.drawTimeline(session);
   return h;
 }, "replay.footHeight");
-// ?demo opens the synthetic fight; ?t=12.5 jumps to a moment in it, e.g. for screenshots; ?focus=n123
+// ?demo opens the demo recording; ?t=12.5 jumps to a moment in it, e.g. for screenshots; ?focus=n123
 // follows that actor instead of you and ?zoom=8 sets how far away the camera starts
-const params = new URLSearchParams(location.search);
 pendingFocus = params.get("focus") ?? undefined;
 cameraDistance = Number(params.get("zoom")) || cameraDistance;
 function jumpTo(at: number): void {
@@ -703,9 +778,12 @@ function jumpTo(at: number): void {
     clock.frac = at - Math.floor(at);
   }
 }
-if (import.meta.env.DEV && params.has("demo")) {
-  open(syntheticSession(), "synthetic demo");
-  jumpTo(Number(params.get("t")));
+// ?demo opens the demo recording that ships with the page (public/demo/demo.jsonl)
+if (params.has("demo")) {
+  fetch("demo/demo.jsonl").then((r) => r.text()).then((text) => {
+    open(text, "demo.jsonl");
+    jumpTo(Number(params.get("t")));
+  });
 }
 // ?session=sessions/name.jsonl opens a recording from the git-ignored sessions folder next to this page
 const sessionPath = params.get("session");
@@ -732,6 +810,12 @@ if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sess
         timeline.dispatchEvent(new PointerEvent("pointermove", { clientX: hud.xOfTick(s, Number(markAt[0])), clientY: y }));
       }, 1500);
     }
+    // ?addNote=text adds a note at the tick shown, e.g. for screenshots
+    const noteText = params.get("addNote");
+    if (noteText && session) {
+      notes.add(clock.t, Math.floor(cycleAt(session, clock.t, 0)), noteText);
+      hud.drawTimeline(session);
+    }
     // ?tab=6 shows that side panel tab
     if (params.has("tab")) hud.pinTab(Number(params.get("tab")));
     // ?range=40-120 zooms the timeline into those ticks
@@ -749,7 +833,11 @@ if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sess
 }
 // Works offline after the first visit (public/sw.js); not in development, where files change constantly
 if (!import.meta.env.DEV && "serviceWorker" in navigator) void navigator.serviceWorker.register("sw.js").catch(() => undefined);
-// ?dialog=connect or ?dialog=privacy opens that dialog, e.g. for screenshots
+// ?dialog=connect, ?dialog=privacy or ?dialog=kofi opens that dialog, e.g. for screenshots
 if (import.meta.env.DEV && params.get("dialog") === "connect") setTimeout(() => folderUi.open(), 500);
 if (import.meta.env.DEV && params.get("dialog") === "privacy") setTimeout(() => folderUi.showPrivacy(), 500);
+// ?tour=3 opens the tutorial at that step (0 first), e.g. for screenshots with ?devCache=inline
+if (import.meta.env.DEV && params.has("tour")) setTimeout(() => void tour.start(Number(params.get("tour"))), 300);
+if (import.meta.env.DEV && params.get("dialog") === "export") setTimeout(() => $("exportOpen").click(), 2500);
+if (import.meta.env.DEV && params.get("dialog") === "kofi") setTimeout(() => document.querySelector<HTMLElement>(".kofi-pill")?.click(), 500);
 requestAnimationFrame(frame);

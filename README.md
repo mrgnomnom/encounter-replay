@@ -1,4 +1,4 @@
-# Encounter Replay
+# OSRS Encounter Replay
 
 Plays back Encounter Recorder (a RuneLite plugin) sessions in 3D, tick
 by tick: the map, every actor's movement, facing and animations, projectiles in flight, hitsplats,
@@ -8,8 +8,10 @@ overhead text, and the side panel, clicks and prayers as they were in game.
 
 1. Record something with the Encounter Recorder RuneLite plugin.
 2. Click **Open replay** in the plugin's panel, or open https://encounter-replay.pages.dev yourself.
-3. The first time, click **Connect RuneLite folders** and pick the two folders it asks for. After that,
-   your recordings are listed under **Recordings…** and open with the game's own models.
+3. The first time, the page walks you through connecting the game cache, which it draws the game from.
+   Then drag a recording onto the page, or use **Import Recording**. **Setup Default Recording
+   Directory** lists your recordings under **Recordings…** and lets the plugin's button open them directly.
+   The first time, a short tutorial plays on a demo recording; **Tutorial** in the header replays it.
 
 It needs a Chromium browser (Chrome, Edge, Brave, Opera) to read the folders.
 
@@ -50,10 +52,12 @@ moment:
 
 ```
 http://127.0.0.1:5180/?session=sessions/tfa.jsonl&t=60.5
-http://127.0.0.1:5180/?demo&t=15.6
+http://127.0.0.1:5180/?demo&t=10
 ```
 
-`?devCache=inline` builds models from the exporter's cache copy (`exporter/build/cache-live`) on the
+`?tour=3` opens the tutorial at that step (with `?devCache=inline` for models). `?demo` opens the demo recording that ships with the page (`public/demo/demo.jsonl`): 20 ticks cut from a
+real fight with `scripts/trim-session.ts`, which carries in the state from before the cut and renames
+players. `?devCache=inline` builds models from the exporter's cache copy (`exporter/build/cache-live`) on the
 page, which is how headless screenshots test it. `npm test` runs the tests, `npm run typecheck` the type
 checker and `npm run build` a static build in `dist/`, followed by `scripts/check-dist.ts`, which fails
 if anything that must never be published (game data, recordings) ended up there. `npm run deploy` builds
@@ -72,7 +76,6 @@ Windows drive, so from WSL the dev server polls for file changes.
 | `src/objects.ts` | Which objects exist at each tick, from map dumps, spawns and removals |
 | `src/objectLayer.ts` | Draws them: spawned objects labelled and coloured per ID, map scenery optional |
 | `src/hud.ts` | Orbs, side panel, clicks, timeline and event log |
-| `src/synthetic.ts` | The synthetic demo fight |
 
 Three.js space is one unit per tile, x east, y up and north towards -z.
 

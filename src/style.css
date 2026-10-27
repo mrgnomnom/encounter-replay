@@ -176,7 +176,17 @@ aside {
 .equip div { padding: 2px 4px; border-bottom: 1px solid var(--slot-line); font-size: 11px; }
 .equip .k { color: var(--muted); }
 .equip .changed { background: color-mix(in srgb, var(--lit) 30%, transparent); }
-#screen { width: 100%; border-radius: 4px; display: block; }
+/* What went on in the timeline's stretch */
+.window-summary { font-size: 12px; margin-bottom: 4px; }
+.summary-row { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.summary-row .label { color: var(--muted); }
+.summary-row .value { margin-left: auto; font-weight: 600; color: var(--ink); }
+.summary-row .value.none { color: var(--muted); font-weight: 400; }
+.summary-row .sub { color: var(--muted); font-size: 11px; order: 3; }
+.summary-ticks { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 6px; }
+.tick-chip { padding: 0 7px; font-size: 11px; border-radius: 10px; border-color: #6b5a1a; color: var(--lit); background: #2a2410; }
+.tick-chip:hover { border-color: var(--lit); }
+.summary-ticks .more { color: var(--muted); font-size: 11px; align-self: center; }
 .clicks { font-size: 11.5px; }
 .clicks .w { color: var(--muted); }
 
@@ -235,3 +245,118 @@ header button.link:hover { color: var(--ink); }
 .folder-row button.primary { border-color: var(--lit); }
 .folder-row .error { color: var(--accent); margin: 6px 0 0; }
 .folder-row .error:empty { display: none; }
+
+/* The landing page: nothing else on screen until the game cache is set up */
+#landing {
+  position: fixed; inset: 0; z-index: 50; background: var(--bg); overflow: auto;
+  display: flex; align-items: center; justify-content: center; padding: 32px 16px;
+}
+#landing[hidden] { display: none; }
+body.landing-open > header, body.landing-open > main, body.landing-open > footer { visibility: hidden; }
+.landing-card { width: min(560px, 100%); }
+.landing-card h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: 0.2px; }
+.landing-card h2 { font-size: 17px; margin: 28px 0 4px; }
+.landing-card p { margin: 6px 0; }
+.landing-card .muted { color: var(--muted); }
+.landing-lede { font-size: 15px; color: var(--muted); }
+.landing-hub a, .landing-card a { color: var(--lit); }
+.landing-steps { margin: 14px 0 0; padding-left: 22px; }
+.landing-steps li { margin: 0 0 16px; padding-left: 4px; }
+.landing-steps li > span { display: block; margin-bottom: 6px; }
+.landing-steps li::marker { color: var(--lit); font-weight: 600; }
+.landing-card .folder-path, .panel-dialog .folder-path { display: flex; gap: 6px; align-items: center; }
+.landing-card .folder-path code, .panel-dialog .folder-path code {
+  flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; background: var(--slot); padding: 5px 8px; border-radius: 4px;
+}
+button.primary { border-color: var(--lit); }
+button.big { padding: 7px 16px; font-size: 14px; }
+.landing-card .error, .panel-dialog .error { color: var(--accent); margin: 6px 0 0; }
+.landing-card .error:empty, .panel-dialog .error:empty { display: none; }
+.landing-note { margin-top: 18px !important; color: var(--muted); font-size: 12px; }
+button.link { border: none; background: none; color: var(--muted); padding: 0; text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+button.link:hover { color: var(--ink); }
+#drop button.link { font-size: 14px; margin-top: 6px; pointer-events: auto; }
+/*
+ * The title in the game's own look: its orange interface title colour with the hard one-pixel black shadow
+ * the client draws under text. The game's fonts are Jagex's, in the cache, so they can't ship with the page
+ */
+.osrs-title {
+  color: #ff981f; text-shadow: 2px 2px 0 #000; font-family: "Trebuchet MS", Verdana, ui-sans-serif, sans-serif;
+  font-weight: 700; letter-spacing: 0.5px; -webkit-font-smoothing: none; font-smooth: never;
+}
+
+/* Ko-fi: plain links styled like Ko-fi's buttons, in the Short Green Guy's green */
+:root { --kofi: #3f9b5b; --kofi-hover: #4cb36b; }
+.kofi-button {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px 8px 12px; border-radius: 999px;
+  background: var(--kofi); color: #fff; font-weight: 600; font-size: 14px; text-decoration: none;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); transition: background 0.15s, transform 0.15s;
+}
+.kofi-button:hover { background: var(--kofi-hover); transform: translateY(-1px); }
+.kofi-cup { width: 20px; height: 20px; flex: none; }
+.landing-support {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; white-space: nowrap;
+}
+#landing { padding-bottom: 90px; }
+#landing a.kofi-button { color: #fff; }
+.kofi-corner { position: relative; margin-left: 4px; }
+.kofi-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: none; background: none;
+  color: var(--muted); font-size: 12px;
+}
+.kofi-pill:hover { color: var(--kofi-hover); }
+.kofi-pill .kofi-cup { width: 15px; height: 15px; }
+.kofi-card {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 270px; padding: 14px 14px 16px; border-radius: 10px; background: var(--panel);
+  border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.kofi-card[hidden] { display: none; }
+.kofi-card p { margin: 6px 0 12px; color: var(--muted); }
+.kofi-card .kofi-button { font-size: 13px; }
+.kofi-close { position: absolute; top: 6px; right: 6px; border: none; background: none; color: var(--muted); font-size: 16px; padding: 0 6px; }
+.kofi-close:hover { color: var(--ink); }
+
+/* The tutorial: one part of the page lit, the rest dimmed, and a small card beside it */
+.tour-spot {
+  position: fixed; z-index: 40; border-radius: 8px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6), 0 0 0 2px var(--lit); transition: all 0.25s ease;
+}
+.tour-card {
+  position: fixed; z-index: 41; width: 300px; padding: 14px 16px 12px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  transition: left 0.25s ease, top 0.25s ease;
+}
+.tour-card.tour-end { width: 400px; }
+.tour-card b { font-size: 14px; }
+.tour-card p { margin: 6px 0 12px; color: var(--ink); line-height: 1.45; }
+.tour-count { float: right; color: var(--muted); font-size: 11px; }
+.tour-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.tour-buttons .link { margin-right: auto; }
+@keyframes tour-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(241, 196, 15, 0); } 30% { box-shadow: 0 0 0 4px rgba(241, 196, 15, 0.6); } }
+.tour-glow { animation: tour-glow 1.2s ease 3; border-color: var(--lit); }
+
+/* Notes and markers, popping up at the bottom left of the map */
+.notes { position: absolute; left: 14px; bottom: 14px; z-index: 5; display: flex; flex-direction: column; gap: 6px; width: min(320px, calc(100% - 28px)); pointer-events: none; }
+.note-card {
+  pointer-events: auto; background: rgba(28, 26, 23, 0.92); border: 1px solid var(--line); border-left: 3px solid #b08cf0;
+  border-radius: 6px; padding: 6px 9px 7px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); opacity: 0.75;
+}
+.note-card.now { opacity: 1; }
+.note-card.yours { border-left-color: var(--lit); }
+.note-card.editing { opacity: 1; border-left-color: var(--lit); }
+.note-head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+.note-tools { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.note-card:hover .note-tools { opacity: 1; }
+.note-tools button { border: none; background: none; color: var(--muted); padding: 0 4px; font-size: 12px; }
+.note-tools button:hover { color: var(--ink); }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.note-text.empty { color: var(--muted); font-style: italic; }
+.note-card textarea {
+  width: 100%; resize: vertical; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px;
+  padding: 5px 6px; font: inherit; margin: 3px 0 6px;
+}
+.note-buttons { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.note-buttons .hint { margin-right: auto; color: var(--muted); font-size: 10.5px; }
+.export-option { display: block; margin: 10px 0; }
+.export-option .muted { color: var(--muted); }

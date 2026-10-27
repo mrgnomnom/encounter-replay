@@ -190,6 +190,24 @@ export class Session {
     return new Session(lines, unreadable);
   }
 
+  /** Adds a line the page made, such as a note, in cycle order within its tick */
+  addLine(line: Line): void {
+    const t = Math.max(0, Math.min(this.lastTick, line.t ?? 0));
+    line.t = t;
+    this.lines.push(line);
+    const list = this.byTick[t];
+    const at = list.findIndex((l) => (l.c ?? 0) > (line.c ?? 0));
+    list.splice(at < 0 ? list.length : at, 0, line);
+  }
+
+  removeLine(line: Line): void {
+    const i = this.lines.indexOf(line);
+    if (i >= 0) this.lines.splice(i, 1);
+    const list = this.byTick[line.t ?? 0];
+    const j = list?.indexOf(line) ?? -1;
+    if (j >= 0) list.splice(j, 1);
+  }
+
   get lastTick(): number {
     return this.byTick.length - 1;
   }
