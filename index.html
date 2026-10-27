@@ -3,15 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The page may only load itself: no connection can carry your files anywhere (also sent as a header, see public/_headers) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Encounter Replay</title>
 </head>
 <body>
   <header>
     <h1>Encounter Replay</h1>
     <span class="meta" id="meta">No session loaded</span>
-    <button id="connectFolder" hidden title="Pick your .runelite folder once: recordings and the game cache are read from it, on this computer only">Connect RuneLite folder</button>
+    <button id="connectFolder" hidden title="Connect your recordings and the game cache, read-only, on this computer only">Connect RuneLite folders</button>
+    <button id="privacyOpen" class="link" title="The folders this page can read, every file it has read, and why nothing leaves your computer">What this page can see</button>
     <select id="recordings" title="Recordings in Encounter Recorder's sessions folder, newest first"><option value="">Recordings…</option></select>
-    <button id="openSession" title="Open a session file. The dialog remembers the sessions folder once you've opened from it; the first time, its path is on your clipboard: Ctrl+L, Ctrl+V, Enter">Open session…</button>
+    <button id="openSession" title="Open a recording file from anywhere on this computer">Open session…</button>
     <input type="file" id="file" accept=".jsonl,.json,.txt" hidden>
   </header>
   <main>
@@ -27,7 +30,7 @@
         <span class="muted" id="bundleStatus"></span>
         <span class="muted">Drag to orbit · right-drag to pan · scroll to zoom</span>
       </div>
-      <div id="drop">Pick a recording from <b>Recordings…</b> or <b>Open session…</b>,<br>or drop a .jsonl session here</div>
+      <div id="drop"><span>Pick a recording from <b>Recordings…</b> or <b>Open session…</b>,<br>or drop a .jsonl session here</span></div>
     </div>
     <aside id="aside">
       <div class="orbs" id="orbs">
@@ -77,6 +80,8 @@
     </div>
     <div id="log"></div>
   </footer>
+  <dialog id="folderDialog" class="panel-dialog"></dialog>
+  <dialog id="privacyDialog" class="panel-dialog"></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -18,7 +18,8 @@ import { ObjectTimeline } from "./objects";
 import { Session } from "./session";
 import { Stage } from "./stage";
 import { syntheticSession } from "./synthetic";
-import { folderPickerSupported, listSessions, pickRuneliteFolder, readSession, reconnect, rememberedFolder, type RuneliteFolder } from "./runeliteFolder";
+import { FolderUi } from "./folderUi";
+import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { toThree, World } from "./world";
 
 // One game tick is 600 ms
@@ -126,11 +127,12 @@ function open(text: string, name: string): void {
   const base = name.replace(/\.jsonl$/, "");
   sessionBase = base;
   const opened = session;
-  // With the RuneLite folder connected, models come straight from the game cache in it
-  if (folder) void buildFromCache(folder.cache);
+  // With the game cache connected, models come straight from it
+  if (folderUi.folders.cache) void buildFromCache(folderUi.folders.cache);
   // ?devCache builds from the dev server's copy of the cache, for testing in a headless browser
-  else if (params.has("devCache")) void buildFromCache(new URL("dev-cache/", location.href).href);
-  else devBundle(name, base, opened);
+  else if (import.meta.env.DEV && params.has("devCache")) void buildFromCache(new URL("dev-cache/", location.href).href);
+  else if (import.meta.env.DEV) devBundle(name, base, opened);
+  else $("bundleStatus").textContent = "boxes for now: connect the game cache to see game models";
   hasFocus = false;
   Object.assign(clock, { t: 0, frac: 0, playing: false });
   $("drop").classList.add("hidden");
@@ -152,6 +154,7 @@ async function buildFromCache(cache: BuildRequest["cache"]): Promise<void> {
       const worker = new Worker(new URL("./cache/build/worker.ts", import.meta.url), { type: "module" });
       worker.onmessage = (e: MessageEvent<BuildMessage>) => {
         const m = e.data;
+        for (const [file, bytes] of m.files) noteRead(file, bytes);
         if ("progress" in m) {
           if (session === opened) $("bundleStatus").textContent = `reading the game cache: ${m.progress}…`;
           return;
@@ -512,7 +515,7 @@ let sessionsFolder: string | undefined;
  * the first pick it opens in the sessions folder. Pages can't point it at a folder themselves, so the
  * first time the folder's path goes on the clipboard, ready to paste into the dialog
  */
-type FilePicker = (o: { id?: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<{ getFile(): Promise<File> }[]>;
+type FilePicker = (o: { id?: string; startIn?: FileSystemDirectoryHandle; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<{ getFile(): Promise<File> }[]>;
 async function openWithPicker(): Promise<void> {
   const picker = (window as unknown as { showOpenFilePicker?: FilePicker }).showOpenFilePicker;
   if (!picker) {
@@ -524,7 +527,9 @@ async function openWithPicker(): Promise<void> {
   // Until the dialog has learned the folder, its path goes on the clipboard (see the button's tooltip)
   if (!learned && sessionsFolder) await navigator.clipboard.writeText(sessionsFolder).catch(() => undefined);
   try {
-    const [handle] = await picker({ id: "encounter-sessions", types: [{ description: "Encounter Recorder sessions", accept: { "application/x-ndjson": [".jsonl"] } }] });
+    // Starts in the recordings folder when it's connected
+    const startIn = folderUi.folders.sessions;
+    const [handle] = await picker({ id: "encounter-sessions", ...(startIn ? { startIn } : {}), types: [{ description: "Encounter Recorder sessions", accept: { "application/x-ndjson": [".jsonl"] } }] });
     openFile(await handle.getFile());
     try { localStorage.setItem("replay.pickerLearned", "1"); } catch { /* storage blocked */ }
   } catch {
@@ -532,54 +537,38 @@ async function openWithPicker(): Promise<void> {
   }
 }
 
-// The RuneLite folder, once connected: recordings and the game cache are read from it
-let folder: RuneliteFolder | undefined;
-let folderToReconnect: FileSystemDirectoryHandle | undefined;
-
-function showFolderButton(): void {
-  const button = $("connectFolder");
-  button.hidden = !folderPickerSupported() || !!folder;
-  button.textContent = folderToReconnect ? "Reconnect RuneLite folder" : "Connect RuneLite folder";
-}
-
-$("connectFolder").onclick = async () => {
-  try {
-    folder = folderToReconnect ? await reconnect(folderToReconnect) : await pickRuneliteFolder();
-  } catch (e) {
-    // Cancelling the picker isn't worth a message
-    if (!(e instanceof DOMException && e.name === "AbortError")) $("drop").textContent = e instanceof Error ? e.message : String(e);
-  }
-  if (!folder) return;
-  folderToReconnect = undefined;
-  showFolderButton();
-  await listRecordings();
-  if (!openFromHash() && session && !bundle) void buildFromCache(folder.cache);
-};
+// The two folders the page reads, once connected: recordings, and the game cache to draw them with
+const folderUi = new FolderUi((kind) => {
+  if (kind === "sessions") void listRecordings().then(() => openFromHash());
+  else if (session && !bundle && folderUi.folders.cache) void buildFromCache(folderUi.folders.cache);
+});
 
 /** #session=<file> opens a recording from the connected folder: the recorder's Replay button links here */
 function openFromHash(): boolean {
   const name = new URLSearchParams(location.hash.slice(1)).get("session");
   if (!name || !/^[\w.-]+\.jsonl$/.test(name)) return false;
-  if (!folder) {
-    $("drop").innerHTML = "";
-    $("drop").append(`Connect your RuneLite folder to open ${name}`);
+  const sessions = folderUi.folders.sessions;
+  if (!sessions) {
+    $("drop").textContent = `Connect your recordings folder to open ${name}`;
+    folderUi.open(`To open ${name}, the replay needs your recordings folder${folderUi.folders.cache ? "" : " and the game cache"}.`);
     return false;
   }
   history.replaceState(null, "", location.pathname + location.search);
-  readSession(folder, name).then((text) => open(text, name), () => ($("drop").textContent = `${name} isn't in your recordings folder`));
+  readSession(sessions, name).then((text) => open(text, name), () => ($("drop").textContent = `${name} isn't in your recordings folder`));
   return true;
 }
 window.addEventListener("hashchange", () => void openFromHash());
 
-// The recorder's own sessions folder: from the connected RuneLite folder, or else listed by the dev
-// server. Newest first, refreshed on open
+// The recorder's own sessions folder: connected, or in development listed by the dev server. Newest
+// first, refreshed on open
 async function listRecordings(): Promise<void> {
   const select = $<HTMLSelectElement>("recordings");
-  if (folder) {
-    const files = await listSessions(folder).catch(() => []);
-    select.title = "Recordings in your RuneLite folder, newest first";
+  const sessions = folderUi.folders.sessions;
+  if (sessions || !import.meta.env.DEV) {
+    const files = sessions ? await listSessions(sessions).catch(() => []) : [];
+    select.title = sessions ? "Your recordings, newest first" : "Connect your recordings folder to list them here";
     const keep = select.value;
-    select.replaceChildren(new Option(files.length ? "Recordings…" : "No recordings yet", ""), ...files.map((f) =>
+    select.replaceChildren(new Option(!sessions ? "Recordings…" : files.length ? "Recordings…" : "No recordings yet", ""), ...files.map((f) =>
       new Option(`${f.name.replace(/\.jsonl$/, "")} · ${(f.size / 1048576).toFixed(1)} MB`, f.name)));
     select.value = keep;
     return;
@@ -600,16 +589,21 @@ async function listRecordings(): Promise<void> {
   }
 }
 $<HTMLSelectElement>("recordings").onfocus = () => void listRecordings();
+$<HTMLSelectElement>("recordings").onmousedown = (e) => {
+  // Nothing to list until the folder is connected: ask for it instead
+  if (!folderUi.folders.sessions && !import.meta.env.DEV) {
+    e.preventDefault();
+    folderUi.open();
+  }
+};
 $<HTMLSelectElement>("recordings").onchange = async (e) => {
   const name = (e.target as HTMLSelectElement).value;
   if (!name) return;
-  const text = folder ? await readSession(folder, name) : await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
+  const sessions = folderUi.folders.sessions;
+  const text = sessions ? await readSession(sessions, name) : await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
   open(text, name);
 };
-void rememberedFolder().then(({ folder: remembered, needsPermission }) => {
-  folder = remembered;
-  folderToReconnect = needsPermission;
-  showFolderButton();
+void folderUi.restore().then(() => {
   void listRecordings();
   openFromHash();
 });
@@ -709,13 +703,13 @@ function jumpTo(at: number): void {
     clock.frac = at - Math.floor(at);
   }
 }
-if (params.has("demo")) {
+if (import.meta.env.DEV && params.has("demo")) {
   open(syntheticSession(), "synthetic demo");
   jumpTo(Number(params.get("t")));
 }
 // ?session=sessions/name.jsonl opens a recording from the git-ignored sessions folder next to this page
 const sessionPath = params.get("session");
-if (sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sessionPath)) {
+if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sessionPath)) {
   // ?accuracy turns the click accuracy view on, e.g. for screenshots
   if (params.has("accuracy")) $<HTMLInputElement>("accuracy").checked = true;
   fetch(sessionPath).then((r) => r.text()).then((text) => {
@@ -753,4 +747,9 @@ if (sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sessionPath)) {
     }
   });
 }
+// Works offline after the first visit (public/sw.js); not in development, where files change constantly
+if (!import.meta.env.DEV && "serviceWorker" in navigator) void navigator.serviceWorker.register("sw.js").catch(() => undefined);
+// ?dialog=connect or ?dialog=privacy opens that dialog, e.g. for screenshots
+if (import.meta.env.DEV && params.get("dialog") === "connect") setTimeout(() => folderUi.open(), 500);
+if (import.meta.env.DEV && params.get("dialog") === "privacy") setTimeout(() => folderUi.showPrivacy(), 500);
 requestAnimationFrame(frame);

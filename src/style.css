@@ -209,3 +209,29 @@ footer { border-top: 1px solid var(--line); padding: 8px 16px; display: flex; fl
   main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   aside { border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* Connecting folders, and what the page can see */
+header button.link { border: none; background: none; color: var(--muted); padding: 3px 4px; text-decoration: underline; text-underline-offset: 2px; }
+header button.link:hover { color: var(--ink); }
+.panel-dialog {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px 20px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+}
+.panel-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.panel-dialog h2 { margin: 0 0 8px; font-size: 16px; }
+.panel-dialog h3 { margin: 14px 0 4px; font-size: 13px; }
+.panel-dialog p { margin: 6px 0; }
+.panel-dialog p.why { color: var(--lit); }
+.panel-dialog .muted { color: var(--muted); }
+.panel-dialog ul { margin: 4px 0; padding-left: 18px; }
+.panel-dialog .files-read { max-height: 180px; overflow: auto; font: 12px ui-monospace, monospace; }
+.panel-dialog > button, .panel-dialog .dialog-buttons { margin-top: 12px; }
+.panel-dialog .dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.folder-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: var(--bg); }
+.folder-head { display: flex; justify-content: space-between; gap: 8px; }
+.folder-head .ok { color: #5fd38d; }
+.folder-path { display: flex; gap: 6px; align-items: center; margin: 6px 0 8px; }
+.folder-path code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; background: var(--slot); padding: 3px 6px; border-radius: 4px; }
+.folder-row button.primary { border-color: var(--lit); }
+.folder-row .error { color: var(--accent); margin: 6px 0 0; }
+.folder-row .error:empty { display: none; }

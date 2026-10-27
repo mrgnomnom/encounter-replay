@@ -1,23 +1,33 @@
 # Encounter Replay
 
-Plays back [Encounter Recorder](../encounter-recorder) sessions in 3D, tick by tick: the map, every
-actor's movement, facing and animations, projectiles in flight, hitsplats, overhead text, and the side
-panel, clicks and prayers as they were in game. Everything runs in the browser; a session is read in
-the page and never uploaded.
+Plays back Encounter Recorder (a RuneLite plugin) sessions in 3D, tick
+by tick: the map, every actor's movement, facing and animations, projectiles in flight, hitsplats,
+overhead text, and the side panel, clicks and prayers as they were in game.
 
-## Running it
+## Using it
 
-```
-npm install
-npm run dev
-```
+1. Record something with the Encounter Recorder RuneLite plugin.
+2. Click **Open replay** in the plugin's panel, or open the replay page yourself.
+3. The first time, click **Connect RuneLite folders** and pick the two folders it asks for. After that,
+   your recordings are listed under **Recordings…** and open with the game's own models.
 
-Then open http://127.0.0.1:5180 and pick a recording from **Recordings…**: the dev server lists
-Encounter Recorder's sessions folder (`.runelite/plugin-data/encounter-recorder/sessions`, found from
-Windows or WSL; set `ENCOUNTER_SESSIONS` to point elsewhere), newest first. **Open session…** starts in that folder
-once it's been used from there (the first time, it puts the folder's path on your clipboard to paste into
-the dialog). You can also drop a session file onto the page; `?demo` opens a made-up fight. A recording opens with models when
-`assets/cache/<recording name>.bundle.json` exists (see "Game models").
+It needs a Chromium browser (Chrome, Edge, Brave, Opera) to read the folders.
+
+## Privacy
+
+The replay runs entirely in your browser. Nothing is uploaded, and there's no server behind it beyond
+the one that serves the page.
+
+- **It reads two folders, view-only:** your recordings
+  (`.runelite/plugin-data/encounter-recorder/sessions`) and the game cache
+  (`.runelite/jagexcache/oldschool/LIVE`, Jagex's game files, the same for every player). It turns away
+  your whole `.runelite` folder, because that also holds your logins.
+- **It can't send anything anywhere.** Its Content Security Policy (in `index.html` and
+  `public/_headers`) tells the browser to block every connection except loading the page itself. You
+  can check it in your browser's developer tools.
+- **It works offline** after the first visit (`public/sw.js` keeps the page's own files, nothing else).
+- **"What this page can see"** in the header lists the folders it has and every file it has read.
+- No accounts, cookies or analytics.
 
 **Follow** picks whose view you're watching: you by default, or anyone else present. The camera stays on
 them (panning lets go; tick *camera* to come back), and the log keeps to lines about them: what they did,
@@ -25,16 +35,29 @@ what was done or aimed at them, and floor effects tied to their attacks. Untick 
 everything while still following. Drag to orbit, right-drag to pan, scroll to zoom. Space plays and pauses, and the
 arrow keys step one tick.
 
-For development, sessions copied into the git-ignored `sessions/` folder open straight from the URL,
-and `t` jumps to a moment:
+## Development
+
+```
+npm install
+npm run dev
+```
+
+Then open http://127.0.0.1:5180. Besides connected folders, the dev server lists Encounter Recorder's
+sessions folder under **Recordings…** (found from Windows or WSL; set `ENCOUNTER_SESSIONS` to point
+elsewhere), and without a connected cache it falls back to bundles from the Java exporter (below).
+Sessions copied into the git-ignored `sessions/` folder open straight from the URL, and `t` jumps to a
+moment:
 
 ```
 http://127.0.0.1:5180/?session=sessions/tfa.jsonl&t=60.5
 http://127.0.0.1:5180/?demo&t=15.6
 ```
 
-`npm test` runs the tests, `npm run typecheck` the type checker and `npm run build` a static build.
-The project is on a Windows drive, so from WSL the dev server polls for file changes.
+`?devCache=inline` builds models from the exporter's cache copy (`exporter/build/cache-live`) on the
+page, which is how headless screenshots test it. `npm test` runs the tests, `npm run typecheck` the type
+checker and `npm run build` a static build in `dist/`, followed by `scripts/check-dist.ts`, which fails
+if anything that must never be published (game data, recordings) ended up there. The project is on a
+Windows drive, so from WSL the dev server polls for file changes.
 
 ## How it works
 
@@ -54,7 +77,24 @@ Three.js space is one unit per tile, x east, y up and north towards -z.
 
 ## Game models
 
-The exporter in `exporter/` reads the game cache RuneLite keeps on your PC and writes everything a
+The page builds what a recording needs from the player's own game cache, in a worker: NPC, object, item,
+body kit and graphic definitions, their models, animations, terrain, textures, interface sprites and
+item icons (`src/cache/build/buildBundle.ts`). The cache reader and loaders are ports of RuneLite's cache
+library, checked against it: every model, definition and item icon in the cache comes out identical.
+
+| Folder | Does |
+|---|---|
+| `src/cache/store/` | Reads `main_file_cache.dat2` and its indexes: sectors, reference tables, gzip and bzip2 |
+| `src/cache/defs/` | Definition loaders: NPCs, objects, items, kits, graphics, animations, textures, sprites, floors, map squares, DB rows |
+| `src/cache/model/` | The model loader, in all its formats |
+| `src/cache/icons/` | The client's item icon renderer |
+| `src/cache/build/` | Finds what a session uses and builds its bundle |
+
+### The Java exporter
+
+Before the page could read the cache itself, the exporter in `exporter/` did this job, and it's kept as
+the reference: `npm run parity -- sessions/<name>.jsonl` builds a session's bundle both ways from the
+same cache and compares them field by field (pictures by their pixels). The exporter reads the game cache RuneLite keeps on your PC and writes everything a
 session uses into one bundle: NPC, object, item, body kit and graphic definitions, their models,
 classic animation frames, texture colours and instance ground colours. The replay loads
 `assets/cache/<session name>.bundle.json` when it opens a session, or you can drop a bundle onto the
@@ -97,9 +137,7 @@ git-ignored, and it must never be published.**
 
 1. **Player body colours.** Skin, hair and clothing colours are client constants rather than cache
    data, so players show their kit's default colours. Gear is exact.
-2. **Terrain outside instances, and overlay shapes.** Ground colours come from the instance's map
-   squares; outside instances the floor is plain, and half-tile and diagonal overlays are drawn as
-   whole tiles.
+2. **Overlay shapes.** Half-tile and diagonal floor overlays are drawn as whole tiles.
 3. **Wall decoration offsets and ground contouring.** Decorations sit at their tile's centre rather
    than pushed against their wall, and objects don't bend to fit sloped ground.
 
@@ -107,5 +145,10 @@ git-ignored, and it must never be published.**
 
 The skeletal animation code in `src/cache/skeletal/` is ported from
 [rs-map-viewer](https://github.com/dennisdev/rs-map-viewer) by dennisdev, under the BSD 2-Clause
-licence kept in that folder. The cache is read with RuneLite's cache library (BSD 2-Clause).
+licence kept in that folder. The cache reader, loaders and item icon renderer in `src/cache/` are ported
+from [RuneLite](https://github.com/runelite/runelite)'s cache library, under the BSD 2-Clause licence kept
+in `src/cache/store/LICENSE`.
+
+Not affiliated with or endorsed by Jagex. RuneScape and Old School RuneScape are trademarks of Jagex Ltd.
+This repository contains no game data: models and maps are read from each player's own game cache.
 
