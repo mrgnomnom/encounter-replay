@@ -1,8 +1,9 @@
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { exportServer } from "./exportServer";
+import { sortRecordings, TAIL_BYTES, ticksFromTail } from "./src/recordingList";
 
 /**
  * The folder Encounter Recorder writes sessions to. ENCOUNTER_SESSIONS wins; otherwise RuneLite's
@@ -18,6 +19,19 @@ function sessionsFolder(): string | undefined {
 }
 
 /** Lists the recorder's sessions at /recordings and serves them at /recordings/<file> */
+/** The end of a file, enough for its last line */
+function tail(path: string, size: number): string {
+  const length = Math.min(size, TAIL_BYTES);
+  const buffer = Buffer.alloc(length);
+  const fd = openSync(path, "r");
+  try {
+    readSync(fd, buffer, 0, length, size - length);
+  } finally {
+    closeSync(fd);
+  }
+  return buffer.toString("utf8");
+}
+
 function recordings(): Plugin {
   return {
     name: "encounter-recordings",
@@ -31,13 +45,12 @@ function recordings(): Plugin {
           return;
         }
         if (!name) {
-          const files = readdirSync(dir)
+          const files = sortRecordings(readdirSync(dir)
             .filter((f) => f.endsWith(".jsonl"))
             .map((f) => {
               const s = statSync(join(dir, f));
-              return { name: f, size: s.size, modified: s.mtimeMs };
-            })
-            .sort((a, b) => b.modified - a.modified);
+              return { name: f, size: s.size, modified: s.mtimeMs, ticks: ticksFromTail(tail(join(dir, f), s.size)) };
+            }));
           res.setHeader("Content-Type", "application/json");
           // The same folder as Windows names it, for pasting into a file dialog
           const drive = /^\/mnt\/([a-z])\/(.*)$/.exec(dir);

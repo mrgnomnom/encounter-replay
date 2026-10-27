@@ -1,4 +1,5 @@
 import type { CacheSource } from "./cache/store/store";
+import { sortRecordings, TAIL_BYTES, ticksFromTail, type RecordingFile } from "./recordingList";
 
 /**
  * What the page reads, each connected once, read-only: the recorder's sessions folder (your recordings),
@@ -160,15 +161,25 @@ async function forget(kind: FolderKind): Promise<void> {
   await request(db.transaction(STORE, "readwrite").objectStore(STORE).delete(kind));
 }
 
-/** Recordings in the sessions folder, newest first */
-export async function listSessions(sessions: FileSystemDirectoryHandle): Promise<{ name: string; size: number; modified: number }[]> {
-  const out: { name: string; size: number; modified: number }[] = [];
+/** Each recording's length in ticks, by name, size and time: read once from the end of its file */
+const knownTicks = new Map<string, number | undefined>();
+
+/** Recordings in the sessions folder, newest first as the recorder lists them, each with its length in ticks */
+export async function listSessions(sessions: FileSystemDirectoryHandle): Promise<RecordingFile[]> {
+  const out: RecordingFile[] = [];
   for await (const entry of (sessions as unknown as { values: () => AsyncIterable<FileSystemHandle> }).values()) {
     if (entry.kind !== "file" || !entry.name.endsWith(".jsonl")) continue;
     const file = await (entry as FileSystemFileHandle).getFile();
-    out.push({ name: entry.name, size: file.size, modified: file.lastModified });
+    const key = `${entry.name}:${file.size}:${file.lastModified}`;
+    if (!knownTicks.has(key)) {
+      // Only the end of the file, for its last tick: recordings run to tens of megabytes
+      const tail = await file.slice(Math.max(0, file.size - TAIL_BYTES)).text();
+      noteRead(entry.name, tail.length);
+      knownTicks.set(key, ticksFromTail(tail));
+    }
+    out.push({ name: entry.name, size: file.size, modified: file.lastModified, ticks: knownTicks.get(key) });
   }
-  return out.sort((a, b) => b.modified - a.modified);
+  return sortRecordings(out);
 }
 
 export async function readSession(sessions: FileSystemDirectoryHandle, name: string): Promise<string> {

@@ -24,6 +24,7 @@ import { Notes } from "./notes";
 import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { VIEWS } from "./timelineViews";
+import { describeRecording, type RecordingFile } from "./recordingList";
 import { preloadTextures } from "./cache/textures";
 import { toThree, World } from "./world";
 
@@ -671,19 +672,19 @@ async function listRecordings(): Promise<void> {
     select.title = sessions ? "Your recordings, newest first" : "Connect your recordings folder to list them here";
     const keep = select.value;
     select.replaceChildren(new Option(!sessions ? "Recordings…" : files.length ? "Recordings…" : "No recordings yet", ""), ...files.map((f) =>
-      new Option(`${f.name.replace(/\.jsonl$/, "")} · ${(f.size / 1048576).toFixed(1)} MB`, f.name)));
+      new Option(describeRecording(f), f.name)));
     select.value = keep;
     return;
   }
   try {
     const r = await fetch("recordings/");
     if (!r.ok) throw new Error(await r.text());
-    const { folder, windowsFolder, files } = (await r.json()) as { folder: string; windowsFolder: string; files: { name: string; size: number; modified: number }[] };
+    const { folder, windowsFolder, files } = (await r.json()) as { folder: string; windowsFolder: string; files: RecordingFile[] };
     sessionsFolder = windowsFolder;
     select.title = `Recordings in ${folder}, newest first`;
     const keep = select.value;
     select.replaceChildren(new Option(files.length ? "Recordings…" : "No recordings yet", ""), ...files.map((f) =>
-      new Option(`${f.name.replace(/\.jsonl$/, "")} · ${(f.size / 1048576).toFixed(1)} MB`, f.name)));
+      new Option(describeRecording(f), f.name)));
     select.value = keep;
   } catch {
     select.replaceChildren(new Option("Recordings folder not found", ""));
