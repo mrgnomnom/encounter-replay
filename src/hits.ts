@@ -25,13 +25,14 @@ const LANDING_CYCLES = 2;
 /**
  * The projectile that landed on a hit's target on the same cycle as the hit, if one did. The projectile
  * line names who fired it and at whom, so this is recorded fact, not inference; hits with no such
- * projectile (melee, floor effects) get no source. A hit the game marks as yours only matches your own
- * projectiles: someone else's landing beside it didn't deal it
+ * projectile (melee, floor effects) get no source. Your hit on something else only matches your own
+ * projectiles: someone else's landing beside it didn't deal it. (Hits on you are marked yours too, so the
+ * mark alone doesn't settle it)
  */
 export function landedProjectile(session: Session, hit: Line): Line | undefined {
   const target = refKey(hit.who);
   return (aimedAt(session).get(target) ?? []).find((l) => l.c <= hit.c && Math.abs(hit.c - l.endCycle) <= LANDING_CYCLES
-    && (!hit.mine || refKey(l.from) === "me"));
+    && (!isYourHit(hit) || refKey(l.from) === "me"));
 }
 
 const projectilesByTarget = new WeakMap<Session, Map<string, Line[]>>();
