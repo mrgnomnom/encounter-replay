@@ -59,7 +59,7 @@ Streamers can do the same thing:
 
 ## Getting started
 
-1. **Record** something with the Encounter Recorder plugin (coming soon to the RuneLite Plugin Hub).
+1. **Record** something with the [Encounter Recorder plugin](https://runelite.net/plugin-hub/show/encounter-recorder) from the RuneLite Plugin Hub.
 2. **Open** https://encounter-replay.pages.dev, or press **Open replay** in the plugin's panel.
 3. **Set up the game cache once.** The page walks you through it, then shows you around with a short
    tutorial on a demo fight.
