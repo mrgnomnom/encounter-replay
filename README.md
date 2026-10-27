@@ -26,7 +26,7 @@ a skilling trip: anything you can see in game, you can watch again.
 
 ![A PK fight played back tick by tick](docs/images/pvp.webp)
 
-*PvP: a one-on-one PK fight, with your gear switches, prayers and clicks as they happened.*
+*PVP: epic flicks never missin ticks (except ticks 80, 83, 85...)*
 
 ## Your files never leave your computer
 
