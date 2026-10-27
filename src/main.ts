@@ -24,6 +24,7 @@ import { Notes } from "./notes";
 import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { VIEWS } from "./timelineViews";
+import { preloadTextures } from "./cache/textures";
 import { toThree, World } from "./world";
 
 // One game tick is 600 ms
@@ -199,7 +200,10 @@ async function buildFromCache(cache: BuildRequest["cache"]): Promise<void> {
       worker.postMessage({ cache, session: sessionText } satisfies BuildRequest);
     });
     if (session !== opened) return;
-    useBundle(new Bundle(raw as never), base);
+    const built = new Bundle(raw as never);
+    await preloadTextures(built);
+    if (session !== opened) return;
+    useBundle(built, base);
     console.info(`Bundle built from the game cache in ${((performance.now() - started) / 1000).toFixed(1)}s`);
   } catch (e) {
     if (session !== opened) return;
@@ -230,6 +234,8 @@ function devBundle(name: string, base: string, opened: Session): void {
       else if (r && r.status !== 404) failure = (await r.json().catch(() => ({}))).error ?? `export failed (${r.status})`;
       if (session !== opened) return;
     }
+    if (b) await preloadTextures(b);
+    if (session !== opened) return;
     useBundle(b, base);
     if (failure) $("bundleStatus").textContent = `export failed: ${failure.split("\n")[0]}`;
   });
@@ -711,7 +717,11 @@ void folderUi.restore(skipLanding).then(() => {
 function openFile(file: File): void {
   // A cache bundle dropped on its own goes with the session already open
   if (file.name.endsWith(".bundle.json")) {
-    file.text().then((text) => useBundle(new Bundle(JSON.parse(text)), file.name.replace(/\.bundle\.json$/, "")));
+    file.text().then(async (text) => {
+      const dropped = new Bundle(JSON.parse(text));
+      await preloadTextures(dropped);
+      useBundle(dropped, file.name.replace(/\.bundle\.json$/, ""));
+    });
     return;
   }
   file.text().then((text) => open(text, file.name));

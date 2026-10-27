@@ -102,7 +102,9 @@ export function spotModel(bundle: Bundle, id: number): Built | undefined {
   if (!def || def.model < 0) return undefined;
   const p = parts(bundle, [def.model], def);
   if (!p.length) return undefined;
-  return { rig: new Rig(p, bundle), placement: { scale: [def.resizeX, def.resizeY, def.resizeX] } };
+  // Turned in quarter turns, the same way the game turns objects
+  const quarterTurns = Math.round((def.rotation ?? 0) / 90) & 3;
+  return { rig: new Rig(p, bundle), placement: { scale: [def.resizeX, def.resizeY, def.resizeX], quarterTurns } };
 }
 
 /** A frame of a classic animation, or a frame of a skeletal one */
@@ -208,10 +210,12 @@ export class RigMesh {
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 4));
     geometry.setAttribute("uv", new THREE.BufferAttribute(cornerUvs(rig.faceUv), 2));
-    // One material for coloured faces, one per texture; each run of faces draws with its own
+    // One material for coloured faces, one per texture; each run of faces draws with its own. A mirrored
+    // model's faces are turned the other way round, so it shows their other side
+    const side = built.placement?.mirror ? MIRRORED_SIDE : MODEL_SIDE;
     const materials: THREE.Material[] = [new THREE.MeshLambertMaterial({
       vertexColors: true,
-      side: THREE.DoubleSide,
+      side,
       transparent: rig.translucent,
       flatShading: true,
     })];
@@ -220,7 +224,7 @@ export class RigMesh {
       const map = run.texture >= 0 ? textureFor(rig.bundle, run.texture) : undefined;
       let index = 0;
       if (map) {
-        materials.push(texturedMaterial(map, rig.translucent));
+        materials.push(texturedMaterial(map, rig.translucent, side));
         index = materials.length - 1;
         this.textured.fill(1, run.start, run.start + run.count);
       }
@@ -230,6 +234,21 @@ export class RigMesh {
     this.mesh.castShadow = true;
     this.writeColors();
     this.writePositions();
+  }
+
+  /**
+   * For graphics, projectiles and objects a fight spawns: no shadow, as nothing in game casts one, and
+   * pulled forward in depth so they draw over floors and floor decorations at the same height, as the
+   * game draws them after the floor
+   */
+  asEffect(): this {
+    this.mesh.castShadow = false;
+    for (const m of this.mesh.material as THREE.Material[]) {
+      m.polygonOffset = true;
+      m.polygonOffsetFactor = -2;
+      m.polygonOffsetUnits = -4;
+    }
+    return this;
   }
 
   /** Poses the model, or rests it for undefined; does nothing if it's already in that pose */
@@ -310,9 +329,17 @@ export class RigMesh {
   }
 }
 
-function texturedMaterial(map: THREE.Texture, translucent: boolean): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({ map, vertexColors: true, side: THREE.DoubleSide, flatShading: true, transparent: translucent, alphaTest: 0.05 });
+function texturedMaterial(map: THREE.Texture, translucent: boolean, side: THREE.Side = MODEL_SIDE): THREE.MeshLambertMaterial {
+  return new THREE.MeshLambertMaterial({ map, vertexColors: true, side, flatShading: true, transparent: translucent, alphaTest: 0.05 });
 }
+
+/**
+ * The side of a model's faces that's drawn. The game draws only the side a face points to and skips the
+ * back, and some effects rely on that: a void puddle is a pink dome over a void one, with the pink faces
+ * pointing down, so from above you see the void through it
+ */
+const MODEL_SIDE: THREE.Side = THREE.FrontSide;
+const MIRRORED_SIDE: THREE.Side = THREE.BackSide;
 
 /** Per-face texture coordinates (u0 v0 u1 v1 u2 v2) as the per-corner attribute three.js wants */
 function cornerUvs(faceUv: Float32Array): Float32Array {
@@ -341,7 +368,7 @@ export function mergeStatic(items: { built: Built; x: number; y: number; z: numb
   const colors = new Float32Array(faceCount * 12);
   const uvs = new Float32Array(faceCount * 6);
   const geometry = new THREE.BufferGeometry();
-  const materials: THREE.Material[] = [new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, flatShading: true, transparent: true, alphaTest: 0.02 })];
+  const materials: THREE.Material[] = [new THREE.MeshLambertMaterial({ vertexColors: true, side: MODEL_SIDE, flatShading: true, transparent: true, alphaTest: 0.02 })];
   const s = [0, 0, 0];
   let at = 0;
   for (const texture of [...buckets.keys()].sort((a, b) => a - b)) {
@@ -350,7 +377,9 @@ export function mergeStatic(items: { built: Built; x: number; y: number; z: numb
       const it = items[i];
       const rig = it.built.rig;
       const rgb = texture >= 0 ? 0xffffff : rig.faceRgb[face];
-      for (let k = 0; k < 3; k++) {
+      // Mirroring turns a face round: its corners go in the other order to keep the side it shows
+      const corners = it.built.placement?.mirror ? [0, 2, 1] : [0, 1, 2];
+      for (const k of corners) {
         const v = rig.faces[face * 3 + k];
         place(rig.pos[v * 3], rig.pos[v * 3 + 1], rig.pos[v * 3 + 2], it.built.placement, s, 0);
         positions[at * 3] = s[0] + it.x;

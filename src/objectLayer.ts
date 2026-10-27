@@ -158,6 +158,8 @@ export class ObjectLayer {
     const anim = this.animOf(o);
     if (built) {
       const model = new RigMesh(built);
+      // What the fight spawns (puddles, markers) is an effect; animated map objects are scenery
+      if (o.spawned) model.asEffect();
       model.placeAt(x, y, (gx, gy) => world.groundAt(gx, gy, o.plane));
       if (o.spawned && timeline.name(l.id)) this.attachLabel(model.mesh, 0.9);
       return { object: model.mesh, model, anim, spawnCycle: l.c };

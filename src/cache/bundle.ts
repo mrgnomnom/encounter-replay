@@ -225,6 +225,8 @@ export class Bundle {
   textureColor(id: number): number | undefined { return this.raw.textures[id]; }
   sprite(group: number, frame: number): string | undefined { return this.raw.sprites?.[group]?.[frame] || undefined; }
   textureImage(id: number): TextureImage | undefined { return this.raw.textureImages?.[id]; }
+  /** The textures that come with pictures */
+  textureImageIds(): number[] { return Object.keys(this.raw.textureImages ?? {}).map(Number); }
   uiSprite(id: number): string | undefined { return this.raw.uiSprites?.[id]; }
   get hasInterface(): boolean { return !!this.raw.uiSprites && Object.keys(this.raw.uiSprites).length > 0; }
 

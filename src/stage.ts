@@ -28,6 +28,9 @@ const HIT_CYCLES = 30;
 const FLASH_TICKS = 0.5;
 // How far back to look for the cycle an animation started on
 const ANIM_LOOKBACK_TICKS = 12;
+// Graphics play until their animation ends, which for a floor-wide attack is several seconds: look back a
+// minute, and let each one's animation length say whether it's still playing
+const GFX_LOOKBACK_TICKS = 100;
 // Overhead prayer icons in RuneLite's order, which is the frame order of the game's prayer sprite group
 const HEAD_ICONS = ["MELEE", "RANGED", "MAGIC", "RETRIBUTION", "SMITE", "REDEMPTION", "RANGE_MAGE", "RANGE_MELEE",
   "MAGE_MELEE", "RANGE_MAGE_MELEE", "WRATH", "SOUL_SPLIT", "DEFLECT_MELEE", "DEFLECT_RANGE", "DEFLECT_MAGE"];
@@ -350,7 +353,7 @@ export class Stage {
     const animLength = lengthOf(bundle, target.anim) ?? 60;
     const effects = this.effectLinks.effectsOf(target.line).map((line) => {
       const built = line.e === "obj" ? objectModel(bundle, line.id, line.config ?? 10) : spotModel(bundle, line.id);
-      const mesh = built ? new RigMesh(built) : null;
+      const mesh = built ? new RigMesh(built).asEffect() : null;
       if (mesh) this.group.add(mesh.mesh);
       return { line, delay: line.c - target.line.c, mesh };
     });
@@ -603,7 +606,7 @@ export class Stage {
           let mesh = this.actorSpots.get(key);
           if (mesh === undefined) {
             const built = spotModel(bundle, spot.id);
-            mesh = built ? new RigMesh(built) : null;
+            mesh = built ? new RigMesh(built).asEffect() : null;
             if (mesh) this.group.add(mesh.mesh);
             this.actorSpots.set(key, mesh);
           }
@@ -628,7 +631,7 @@ export class Stage {
     let m = this.spotMeshes.get(line);
     if (m === undefined) {
       const built = this.bundle ? spotModel(this.bundle, id) : undefined;
-      m = built ? new RigMesh(built) : null;
+      m = built ? new RigMesh(built).asEffect() : null;
       if (m) this.group.add(m.mesh);
       this.spotMeshes.set(line, m);
     }
@@ -690,20 +693,35 @@ export class Stage {
     return mesh;
   }
 
+  /** Each tick's graphics, gathered once per recording so looking a minute back each frame stays cheap */
+  private gfxByTick: { session: Session; ticks: Line[][] } | undefined;
+
+  /** Graphics placed by a moment within the last GFX_LOOKBACK_TICKS ticks, as happened() gives them */
+  private recentGraphics(session: Session, t: number, cycle: number): Line[] {
+    if (this.gfxByTick?.session !== session) {
+      this.gfxByTick = { session, ticks: session.byTick.map((lines) => lines.filter((l) => l.e === "gfx")) };
+    }
+    const ticks = this.gfxByTick.ticks;
+    const out: Line[] = [];
+    for (let i = Math.max(0, t + 1 - GFX_LOOKBACK_TICKS); i <= Math.min(ticks.length - 1, t + 1); i++) {
+      for (const l of ticks[i]) if (l.c <= cycle) out.push(l);
+    }
+    return out;
+  }
+
   private drawGraphics(session: Session, t: number, frac: number, cycle: number, plane: number, world: World, shown: Set<Line>): void {
     let used = 0;
-    for (const g of happened(session, t, 4, "gfx", cycle)) {
+    for (const g of this.recentGraphics(session, t, cycle)) {
       if (g.lx == null || g.p !== plane) continue;
       const x = g.lx / 128;
       const y = g.ly / 128;
       const since = cycle - (g.start ?? g.c);
       if (since < 0) continue;
       const def = this.bundle?.spotanim(g.id);
+      // Graphics play their animation once, then vanish: a finished one isn't built at all
+      if (def && this.bundle && since > (lengthOf(this.bundle, def.anim) ?? 60)) continue;
       const model = def ? this.spotMesh(g, g.id) : null;
       if (model && this.bundle && def) {
-        // Graphics play their animation once, then vanish
-        const length = lengthOf(this.bundle, def.anim) ?? 60;
-        if (since > length) continue;
         shown.add(g);
         // A graphic's z is its absolute height (negative going up), already including the ground under it
         toThree(x, y, g.z != null ? -g.z / 128 : world.groundAt(x, y), model.mesh.position);

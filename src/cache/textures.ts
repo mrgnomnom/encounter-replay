@@ -8,22 +8,53 @@ import type { Bundle } from "./bundle";
 
 const made = new WeakMap<Bundle, Map<number, THREE.Texture | null>>();
 
-export function textureFor(bundle: Bundle, id: number): THREE.Texture | undefined {
+function texturesOf(bundle: Bundle): Map<number, THREE.Texture | null> {
   let byId = made.get(bundle);
   if (!byId) {
     byId = new Map();
     made.set(bundle, byId);
   }
+  return byId;
+}
+
+function configure(texture: THREE.Texture): THREE.Texture {
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  // The client's texture coordinates start at the top of the image
+  texture.flipY = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * Decodes every texture's picture before the bundle is used. A texture still loading draws nothing, so
+ * without this a textured face (the void floor, a cape) can be missing for its first moments, or from a
+ * screenshot taken then
+ */
+export async function preloadTextures(bundle: Bundle): Promise<void> {
+  const byId = texturesOf(bundle);
+  await Promise.all(bundle.textureImageIds().map(async (id) => {
+    const image = bundle.textureImage(id);
+    if (!image || byId.has(id)) return;
+    const picture = new Image();
+    picture.src = image.png;
+    try {
+      await picture.decode();
+    } catch {
+      return;
+    }
+    const texture = configure(new THREE.Texture(picture));
+    texture.needsUpdate = true;
+    byId.set(id, texture);
+  }));
+}
+
+export function textureFor(bundle: Bundle, id: number): THREE.Texture | undefined {
+  const byId = texturesOf(bundle);
   let texture = byId.get(id);
   if (texture === undefined) {
+    // Not preloaded: loads now, and draws once it has
     const image = bundle.textureImage(id);
-    texture = image ? new THREE.TextureLoader().load(image.png) : null;
-    if (texture) {
-      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-      // The client's texture coordinates start at the top of the image
-      texture.flipY = false;
-      texture.colorSpace = THREE.SRGBColorSpace;
-    }
+    texture = image ? configure(new THREE.TextureLoader().load(image.png)) : null;
     byId.set(id, texture);
   }
   return texture ?? undefined;
