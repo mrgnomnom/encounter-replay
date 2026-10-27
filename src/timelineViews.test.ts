@@ -52,3 +52,15 @@ describe("hit sources", () => {
     expect(describeLine(session, yours)).toContain("(yours)");
   });
 });
+
+describe("stats view", () => {
+  it("reads your hitpoints, prayer, run and spec off each tick", async () => {
+    const { VIEWS } = await import("./timelineViews");
+    const stats = VIEWS.find((v) => v.id === "stats")!;
+    const session = Session.parse([
+      { t: 0, c: 1, e: "header", format: 5, label: "Test" },
+      { t: 0, c: 2, e: "tick", me: { who: { k: "me" }, hpNow: 80, hpMax: 99, prayNow: 45, prayMax: 91, run: 9406, spec: 500 } },
+    ].map((l) => JSON.stringify(l)).join("\n"));
+    expect(stats.note!({ session } as never, 0)).toBe("HP 80/99 · prayer 45/91 · run 94% · spec 50%");
+  });
+});

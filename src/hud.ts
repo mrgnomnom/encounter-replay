@@ -2,14 +2,15 @@ import type { Bundle } from "./cache/bundle";
 import { GameUi } from "./gameui";
 import type { ClickPoint } from "./accuracy";
 import { targetsOf, type Target } from "./highlight";
-import { HEAL_HITSPLAT, isOthersHit, isYourHit, landedProjectile } from "./hits";
+import { isOthersHit, isYourHit, landedProjectile } from "./hits";
 import type { EffectLinks } from "./links";
 import { pendingAt, type Outcome, type OutcomeStatus } from "./outcomes";
 import { effectsOfActor, refOfKey, relatesTo } from "./relevance";
-import { refKey, stoppedTargeting, type Line, type Session } from "./session";
-import { VIEWS, type TimelineArea, type TimelineView } from "./timelineViews";
+import { stoppedTargeting, type Line, type Session } from "./session";
+import { damageSeries, formatRate, VIEWS, type TimelineArea, type TimelineView } from "./timelineViews";
 
 const PRAYER_INTERFACE = 541;
+const TICK_SECONDS = 0.6;
 const MARK_COLOR = "#b08cf0";
 // Room at each end of the timeline, in CSS pixels, so marks on the first and last ticks aren't cut off
 const PLOT_INSET = 4;
@@ -148,21 +149,15 @@ export class Hud {
   /** Jumps to a tick, for the summary's links; set by the page */
   onJump: (t: number) => void = () => {};
 
-  /** What went on in the timeline's stretch: damage you took, and prayer and gear switches that landed late */
+  /**
+   * What went on in the timeline's stretch: prayer and gear switches that landed late, and damage dealt and
+   * taken by whoever you follow, with the average per second over the stretch
+   */
   private summary(session: Session): void {
     const [from, to] = this.range(session);
     $("summaryTitle").textContent = this.zoom ? `Ticks ${from}–${to}` : "Whole recording";
     const box = $("windowSummary");
     box.replaceChildren();
-    let damage = 0;
-    let hits = 0;
-    for (let t = from; t <= to; t++) {
-      for (const l of session.events(t)) {
-        if (l.e !== "hit" || !l.who || refKey(l.who) !== "me" || l.type === HEAL_HITSPLAT) continue;
-        damage += l.amount ?? 0;
-        if (l.amount > 0) hits++;
-      }
-    }
     const late = this.outcomes.filter((o) => o.status === "late" && o.click.t >= from && o.click.t <= to);
     const prayer = late.filter((o) => o.click.widget?.[0] === PRAYER_INTERFACE);
     const gear = late.filter((o) => ["Wear", "Wield", "Equip"].includes(o.click.option));
@@ -185,10 +180,23 @@ export class Hud {
       if (items.length > MAX_TICK_CHIPS) list.appendChild(span("more", `+${items.length - MAX_TICK_CHIPS} more · zoom in to see them`));
       box.appendChild(list);
     };
-    row("Damage taken", `${damage}`, "Damage on your hitsplats in this stretch", []);
-    if (hits) box.lastElementChild!.appendChild(span("sub", ` in ${hits} hit${hits === 1 ? "" : "s"}`));
     row("Late prayer switches", `${prayer.length}`, "Prayer clicks that missed the tick's cut-off and landed a tick later. Click a tick to jump to it", prayer);
     row("Late gear switches", `${gear.length}`, "Equip clicks that missed the tick's cut-off and landed a tick later. Click a tick to jump to it", gear);
+
+    // Damage over the stretch, counted as the damage view counts it
+    const s = damageSeries(session, this.followKey);
+    const end = Math.min(to + 1, s.dealtSum.length - 1);
+    const seconds = Math.max(1, end - from) * TICK_SECONDS;
+    const whose = this.followKey === "me" ? "you" : "whoever you follow";
+    const total = (sum: Float64Array) => sum[end] - sum[Math.max(0, from)];
+    const damageRow = (label: string, amount: number, help: string) => {
+      row(label, `${amount}`, help);
+      if (amount) box.lastElementChild!.appendChild(span("sub", ` · ${formatRate(amount / seconds)}/s avg`));
+    };
+    damageRow("Damage dealt", total(s.dealtSum), this.followKey === "me"
+      ? "Damage you dealt in this stretch (hitsplats the game marks as yours), and the average per second"
+      : "Damage they dealt in this stretch with projectiles that landed, and the average per second. Other players' melee can't be told apart from anyone else's, so it isn't counted");
+    damageRow("Damage taken", total(s.takenSum), `Damage on ${whose === "you" ? "your" : "their"} hitsplats in this stretch, heals left out, and the average per second`);
   }
 
   /** Shows a side panel tab regardless of the one open in game */

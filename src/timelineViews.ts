@@ -168,21 +168,95 @@ export function rateAt(sum: Float64Array, t: number): number {
   return (sum[end] - sum[start]) / (RATE_TICKS * TICK_SECONDS);
 }
 
-/** How a damage view is laid out on the canvas: the rates' scale, and the strip of hits along the bottom */
-function damageLayout(a: TimelineArea, peak: number) {
-  const { H, dpr } = a;
-  const strip = Math.min(8 * dpr, Math.round(H * 0.18));
-  const bottom = H - strip - 2 * dpr;
-  const top = 7 * dpr;
-  const max = niceCeiling(Math.max(1, peak));
-  return { strip, bottom, top, max, y: (v: number) => bottom - (Math.min(v, max) / max) * (bottom - top) };
+// ---------- Shared by the views that plot values: a scale from 0, an axis, and the hover guide ----------
+
+/** A vertical scale from 0 at the bottom to max at the top, on the canvas */
+interface Scale {
+  top: number;
+  bottom: number;
+  max: number;
+  y(v: number): number;
 }
 
-/** The highest rate in the stretch shown */
-function peakRate(a: TimelineArea, s: DamageSeries): number {
+/** A scale from 0 to max, leaving room below the plot (for a strip of marks) */
+function scaleFor(a: TimelineArea, max: number, below = 0): Scale {
+  const top = 7 * a.dpr;
+  const bottom = a.H - below - 2 * a.dpr;
+  return { top, bottom, max, y: (v) => bottom - (Math.min(v, max) / max) * (bottom - top) };
+}
+
+/** The axis at the left: 0 at the bottom, the top of the scale, and halfway when there's room */
+function drawAxis(ctx: CanvasRenderingContext2D, a: TimelineArea, s: Scale, label: (v: number) => string): void {
+  const { dpr, left, right } = a;
+  ctx.font = `${10 * dpr}px sans-serif`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (const v of a.H / dpr >= 60 ? [0, s.max / 2, s.max] : [0, s.max]) {
+    ctx.fillStyle = v === 0 ? "#4a463f" : "#2f2c28";
+    ctx.fillRect(left, Math.round(s.y(v)), right - left, dpr);
+    ctx.fillStyle = "#c9c3b8";
+    ctx.fillText(label(v), left - 6 * dpr, Math.min(s.bottom, Math.max(s.top, s.y(v))));
+  }
+  ctx.fillStyle = "#4a463f";
+  ctx.fillRect(left - 2 * dpr, s.top, dpr, s.bottom - s.top);
+  ctx.textAlign = "left";
+}
+
+/**
+ * A line through value(t), sampled every other pixel; filled lightly underneath when fill is given.
+ * Ticks with no value break the line
+ */
+function drawSeries(ctx: CanvasRenderingContext2D, a: TimelineArea, s: Scale, value: (t: number) => number | undefined, color: string, fill = 0): void {
+  const { from, to, dpr, x } = a;
+  const spacing = (a.right - a.left) / Math.max(1, to - from);
+  const runs: [number, number][][] = [[]];
+  for (let px = x(from); px <= x(to) + 0.5; px += 2 * dpr) {
+    const v = value(from + (px - x(from)) / spacing);
+    if (v === undefined) runs.push([]);
+    else runs[runs.length - 1].push([px, s.y(v)]);
+  }
+  for (const points of runs) {
+    if (points.length < 2 || points.every((p) => p[1] >= s.bottom)) continue;
+    if (fill) {
+      ctx.fillStyle = withAlpha(color, fill);
+      ctx.beginPath();
+      ctx.moveTo(points[0][0], s.bottom);
+      for (const [px, py] of points) ctx.lineTo(px, py);
+      ctx.lineTo(points[points.length - 1][0], s.bottom);
+      ctx.fill();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    points.forEach(([px, py], n) => (n ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.stroke();
+  }
+}
+
+/** The hover guide: a line down tick t and a dot on each value there */
+function drawGuide(ctx: CanvasRenderingContext2D, a: TimelineArea, t: number, s: Scale, points: [number | undefined, string][]): void {
+  const { dpr } = a;
+  const cx = a.x(t) + a.tickW / 2;
+  ctx.fillStyle = "rgba(236, 232, 225, 0.55)";
+  ctx.fillRect(Math.round(cx), s.top, dpr, s.bottom - s.top);
+  for (const [v, color] of points) {
+    if (v === undefined) continue;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = "#171614";
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.arc(cx, s.y(v), 3.5 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** The damage view's scale: the highest rate in the stretch shown, with room for the strip of hits */
+function damageScale(a: TimelineArea, s: DamageSeries): { scale: Scale; strip: number } {
   let peak = 0;
   for (let t = a.from; t <= a.to; t++) peak = Math.max(peak, rateAt(s.dealtSum, t), rateAt(s.takenSum, t));
-  return peak;
+  const strip = Math.min(8 * a.dpr, Math.round(a.H * 0.18));
+  return { scale: scaleFor(a, niceCeiling(Math.max(1, peak)), strip), strip };
 }
 
 const damage: TimelineView = {
@@ -201,45 +275,12 @@ const damage: TimelineView = {
     { label: "hits", color: "#8d877d", top: true, help: "Along the bottom: each hit dealt (upper row) and taken (lower row)" },
   ],
   draw(ctx, a) {
-    const { from, to, dpr, x, left, right } = a;
+    const { from, to, dpr, x } = a;
     const s = damageSeries(a.session, a.followKey);
-    const { strip, bottom, top, max, y } = damageLayout(a, peakRate(a, s));
-    const span = Math.max(1, to - from);
-    const spacing = (right - left) / span;
-
-    // The axis: 0 at the bottom, the top of the scale, and halfway when there's room
-    const levels = a.H / dpr >= 60 ? [0, max / 2, max] : [0, max];
-    ctx.font = `${10 * dpr}px sans-serif`;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (const v of levels) {
-      ctx.fillStyle = v === 0 ? "#4a463f" : "#2f2c28";
-      ctx.fillRect(left, Math.round(y(v)), right - left, dpr);
-      ctx.fillStyle = "#c9c3b8";
-      ctx.fillText(v === 0 ? "0" : `${formatRate(v)}/s`, left - 6 * dpr, Math.min(bottom, Math.max(top, y(v))));
-    }
-    ctx.fillStyle = "#4a463f";
-    ctx.fillRect(left - 2 * dpr, top, dpr, bottom - top);
-
-    // The rates, one sample every other pixel, filled lightly underneath
-    const step = 2 * dpr;
-    for (const [sum, color] of [[s.takenSum, TAKEN_COLOR], [s.dealtSum, DEALT_COLOR]] as const) {
-      const points: [number, number][] = [];
-      for (let px = x(from); px <= x(to) + 0.5; px += step) points.push([px, y(rateAt(sum, from + (px - x(from)) / spacing))]);
-      if (points.every((p) => p[1] >= bottom)) continue;
-      ctx.fillStyle = withAlpha(color, 0.16);
-      ctx.beginPath();
-      ctx.moveTo(points[0][0], bottom);
-      for (const [px, py] of points) ctx.lineTo(px, py);
-      ctx.lineTo(points[points.length - 1][0], bottom);
-      ctx.fill();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath();
-      points.forEach(([px, py], n) => (n ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-      ctx.stroke();
-    }
-
+    const { scale, strip } = damageScale(a, s);
+    drawAxis(ctx, a, scale, (v) => (v === 0 ? "0" : `${formatRate(v)}/s`));
+    drawSeries(ctx, a, scale, (t) => rateAt(s.takenSum, t), TAKEN_COLOR, 0.16);
+    drawSeries(ctx, a, scale, (t) => rateAt(s.dealtSum, t), DEALT_COLOR, 0.16);
     // Each hit: dealt in the upper row of the strip, taken in the lower
     const row = Math.max(dpr, Math.floor(strip / 2));
     const markW = Math.max(dpr, a.tickW);
@@ -247,7 +288,6 @@ const damage: TimelineView = {
       if (s.dealt[t]) { ctx.fillStyle = DEALT_COLOR; ctx.fillRect(x(t), a.H - 2 * row, markW, row - (row > 2 * dpr ? dpr : 0)); }
       if (s.taken[t]) { ctx.fillStyle = TAKEN_COLOR; ctx.fillRect(x(t), a.H - row, markW, row); }
     }
-    ctx.textAlign = "left";
   },
   linesAt(a, t) {
     const hits = a.session.events(t).filter((l) => l.e === "hit");
@@ -259,20 +299,68 @@ const damage: TimelineView = {
   },
   drawHover(ctx, a, t) {
     const s = damageSeries(a.session, a.followKey);
-    const { bottom, top, y } = damageLayout(a, peakRate(a, s));
-    const { dpr } = a;
-    const cx = a.x(t) + a.tickW / 2;
-    ctx.fillStyle = "rgba(236, 232, 225, 0.55)";
-    ctx.fillRect(Math.round(cx), top, dpr, bottom - top);
-    for (const [sum, color] of [[s.takenSum, TAKEN_COLOR], [s.dealtSum, DEALT_COLOR]] as const) {
-      ctx.fillStyle = color;
-      ctx.strokeStyle = "#171614";
-      ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath();
-      ctx.arc(cx, y(rateAt(sum, t)), 3.5 * dpr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
+    drawGuide(ctx, a, t, damageScale(a, s).scale, [[rateAt(s.takenSum, t), TAKEN_COLOR], [rateAt(s.dealtSum, t), DEALT_COLOR]]);
+  },
+};
+
+// ---------- Stats: your hitpoints, prayer, run energy and special attack, as shares of their maximum ----------
+
+interface Stat {
+  label: string;
+  color: string;
+  /** Now and the most it goes to normally, from a tick's snapshot of you */
+  read(me: TickMe): [number, number];
+  /** How the value reads in the tooltip */
+  show(now: number, max: number): string;
+}
+
+type TickMe = { hpNow: number; hpMax: number; prayNow: number; prayMax: number; run: number; spec: number };
+
+// The colours of the game's orbs
+const STATS: Stat[] = [
+  { label: "HP", color: "#e5534b", read: (m) => [m.hpNow, m.hpMax], show: (n, m) => `${n}/${m}` },
+  { label: "prayer", color: "#a77ce8", read: (m) => [m.prayNow, m.prayMax], show: (n, m) => `${n}/${m}` },
+  { label: "run", color: "#e2b23a", read: (m) => [m.run / 100, 100], show: (n) => `${Math.floor(n)}%` },
+  { label: "spec", color: "#4aa3e8", read: (m) => [m.spec / 10, 100], show: (n) => `${Math.floor(n)}%` },
+];
+
+/** A stat at tick t as a percentage of its maximum (boosts go over 100), or undefined if not recorded */
+function statAt(session: Session, stat: Stat, t: number): number | undefined {
+  const me = session.tickAt(Math.floor(t))?.me as TickMe | undefined;
+  if (!me) return undefined;
+  const [now, max] = stat.read(me);
+  return max > 0 ? (100 * now) / max : undefined;
+}
+
+/** The stats view's scale: 100%, or more when a boost (a brew, say) takes a stat over its maximum */
+function statsScale(a: TimelineArea): Scale {
+  let peak = 100;
+  for (let t = a.from; t <= a.to; t++) for (const stat of STATS) peak = Math.max(peak, statAt(a.session, stat, t) ?? 0);
+  return scaleFor(a, Math.ceil(peak / 10) * 10);
+}
+
+const stats: TimelineView = {
+  id: "stats",
+  name: "Stats",
+  help: "Your hitpoints, prayer, run energy and special attack over time, as a share of each one's maximum. The recording has these for you only",
+  axisWidth: 42,
+  legend: (followKey) => STATS.map((s) => ({
+    label: s.label, color: s.color, line: true,
+    help: `Your ${s.label === "HP" ? "hitpoints" : s.label === "spec" ? "special attack energy" : s.label === "run" ? "run energy" : s.label} as a share of its maximum${followKey === "me" ? "" : ", whoever you follow: the recording has stats for you only"}`,
+  })),
+  draw(ctx, a) {
+    const scale = statsScale(a);
+    drawAxis(ctx, a, scale, (v) => `${Math.round(v)}%`);
+    for (const stat of STATS) drawSeries(ctx, a, scale, (t) => statAt(a.session, stat, t), stat.color);
+  },
+  linesAt: () => [],
+  note(a, t) {
+    const me = a.session.tickAt(t)?.me as TickMe | undefined;
+    if (!me) return "no stats recorded on this tick";
+    return STATS.map((s) => `${s.label} ${s.show(...s.read(me))}`).join(" · ");
+  },
+  drawHover(ctx, a, t) {
+    drawGuide(ctx, a, t, statsScale(a), STATS.map((s) => [statAt(a.session, s, t), s.color]));
   },
 };
 
@@ -282,11 +370,11 @@ export function niceCeiling(v: number): number {
   return ([1, 2, 2.5, 5, 10].find((m) => m * p >= v - 1e-9) ?? 10) * p;
 }
 
-function formatRate(v: number): string {
+export function formatRate(v: number): string {
   return v >= 10 || Number.isInteger(v) ? String(Math.round(v)) : v.toFixed(1);
 }
 
-export const VIEWS: TimelineView[] = [tickEvents, damage];
+export const VIEWS: TimelineView[] = [tickEvents, damage, stats];
 
 function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
