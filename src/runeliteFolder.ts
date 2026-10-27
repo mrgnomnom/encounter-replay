@@ -1,18 +1,27 @@
 import type { CacheSource } from "./cache/store/store";
 
 /**
- * The two folders the page reads, each connected once with the browser's folder picker, read-only:
- * the recorder's sessions folder (your recordings) and the game cache (Jagex's game files, the same for
- * every player). Never .runelite itself, which also holds your logins. The browser remembers both; it
- * may ask again for permission to read them. Every file read is noted, for the page to show.
+ * What the page reads, each connected once, read-only: the recorder's sessions folder (your recordings),
+ * with the browser's folder picker, and the game cache (Jagex's game files, the same for every player),
+ * as its own files only. The cache's folder also holds the client's preferences, which can include a
+ * remembered username, so the page asks for the main_file_cache files with a file picker that shows
+ * nothing else, rather than the folder. Never .runelite itself, which also holds your logins. The browser
+ * remembers both; it may ask again for permission to read them. Every file read is noted, for the page
+ * to show.
  */
 
 export type FolderKind = "sessions" | "cache";
 
 export interface Folders {
   sessions?: FileSystemDirectoryHandle;
-  cache?: FileSystemDirectoryHandle;
+  /** The game cache's own files, main_file_cache.dat2 and its .idx files, and nothing else */
+  cache?: FileSystemFileHandle[];
 }
+
+/** The game cache's own files; the folder's other files, like the client's preferences, never are */
+const CACHE_FILE = /^main_file_cache\.(dat2|idx\d+)$/;
+// Extensions for the file picker's filter, which then lists no other file and offers no "All files"
+const CACHE_EXTENSIONS = [".dat2", ".idx255", ...Array.from({ length: 64 }, (_, i) => `.idx${i}`)];
 
 const DB = "encounter-replay";
 const STORE = "handles";
@@ -29,7 +38,7 @@ export const FOLDER_PATHS: Record<FolderKind, { windows: string; other: string }
   },
 };
 
-export const folderPickerSupported = (): boolean => "showDirectoryPicker" in window;
+export const folderPickerSupported = (): boolean => "showDirectoryPicker" in window && "showOpenFilePicker" in window;
 
 /** Files the page has read this visit, by name, with how many bytes */
 export const filesRead = new Map<string, number>();
@@ -42,28 +51,47 @@ export function onRead(listener: () => void): void {
   listeners.add(listener);
 }
 
-/** Asks for one of the folders, and turns away any other folder, .runelite above all */
-export async function pickFolder(kind: FolderKind): Promise<FileSystemDirectoryHandle> {
+/** Asks for the recordings folder, and turns away any other folder, .runelite above all */
+export async function pickSessionsFolder(): Promise<FileSystemDirectoryHandle> {
   const picker = (window as unknown as { showDirectoryPicker: (o: object) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
-  const dir = await picker({ id: `runelite-${kind}`, mode: "read" });
-  const problem = await checkFolder(kind, dir);
-  if (problem) throw new Error(problem);
-  await store(kind, dir);
+  const dir = await picker({ id: "runelite-sessions", mode: "read" });
+  const where = FOLDER_PATHS.sessions.windows.replace("%USERPROFILE%\\", "");
+  if (await hasEntry(dir, "credentials.properties") || await hasEntry(dir, "profiles2") || dir.name === ".runelite") {
+    throw new Error(`That's your whole .runelite folder, which also holds your logins: this page doesn't want it. Pick ${where} inside it instead.`);
+  }
+  if (dir.name !== "sessions") throw new Error(`"${dir.name}" isn't Encounter Recorder's recordings folder: pick ${where}.`);
+  await store("sessions", dir);
   return dir;
 }
 
-async function checkFolder(kind: FolderKind, dir: FileSystemDirectoryHandle): Promise<string | undefined> {
-  const where = FOLDER_PATHS[kind].windows.replace("%USERPROFILE%\\", "");
-  if (await hasEntry(dir, "credentials.properties") || await hasEntry(dir, "profiles2") || dir.name === ".runelite") {
-    return `That's your whole .runelite folder, which also holds your logins: this page doesn't want it. Pick ${where} inside it instead.`;
+/**
+ * Asks for the game cache's files: the picker lists only main_file_cache files, and any other file is
+ * dropped. All of them are needed: the data file, and every index the master index (idx255) lists
+ */
+export async function pickCacheFiles(): Promise<FileSystemFileHandle[]> {
+  const picker = (window as unknown as { showOpenFilePicker: (o: object) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker;
+  const chosen = await picker({
+    id: "runelite-cache",
+    multiple: true,
+    excludeAcceptAllOption: true,
+    types: [{ description: "Game cache files (main_file_cache)", accept: { "application/octet-stream": CACHE_EXTENSIONS } }],
+  });
+  const files = chosen.filter((f) => CACHE_FILE.test(f.name));
+  const names = new Set(files.map((f) => f.name));
+  if (!names.has("main_file_cache.dat2") || !names.has("main_file_cache.idx255")) {
+    throw new Error(files.length
+      ? "That's not all of the game cache: select every file in the folder (Ctrl+A, or Cmd+A on a Mac), then click Open."
+      : "Those aren't the game cache's files: open the location above, select every file (Ctrl+A), then click Open.");
   }
-  if (kind === "cache" && !(await hasEntry(dir, "main_file_cache.dat2"))) {
-    return `"${dir.name}" isn't the game cache: pick ${where}.`;
+  // The master index has 6 bytes for each index
+  const meta = files.find((f) => f.name === "main_file_cache.idx255")!;
+  const indexes = Math.floor((await meta.getFile()).size / 6);
+  const missing = Array.from({ length: indexes }, (_, i) => `main_file_cache.idx${i}`).filter((n) => !names.has(n));
+  if (missing.length) {
+    throw new Error(`Some of the game cache is missing (${missing.length} file${missing.length === 1 ? "" : "s"}, like ${missing[0]}): select every file in the folder (Ctrl+A), then click Open.`);
   }
-  if (kind === "sessions" && dir.name !== "sessions") {
-    return `"${dir.name}" isn't Encounter Recorder's recordings folder: pick ${where}.`;
-  }
-  return undefined;
+  await store("cache", files);
+  return files;
 }
 
 async function hasEntry(dir: FileSystemDirectoryHandle, name: string): Promise<boolean> {
@@ -78,29 +106,49 @@ async function hasEntry(dir: FileSystemDirectoryHandle, name: string): Promise<b
   return false;
 }
 
-/** The folders connected before: those readable now, and those the browser wants to ask about again */
-export async function rememberedFolders(): Promise<{ ready: Folders; needPermission: Folders }> {
+type Permissioned = { queryPermission(o: object): Promise<PermissionState>; requestPermission(o: object): Promise<PermissionState> };
+const permission = (h: FileSystemHandle) => (h as unknown as Permissioned).queryPermission({ mode: "read" });
+
+/**
+ * What was connected before: readable now, or wanting the browser to ask again. upgraded is set when the
+ * cache was connected as a whole folder, as the page once asked: that access is dropped, to be replaced
+ * by the cache's own files
+ */
+export async function rememberedFolders(): Promise<{ ready: Folders; needPermission: Folders; upgraded: boolean }> {
   const ready: Folders = {};
   const needPermission: Folders = {};
-  for (const kind of ["sessions", "cache"] as const) {
-    const dir = await recall(kind);
-    if (!dir) continue;
-    const state = await (dir as unknown as { queryPermission: (o: object) => Promise<PermissionState> }).queryPermission({ mode: "read" });
-    (state === "granted" ? ready : needPermission)[kind] = dir;
+  const sessions = await recall("sessions") as FileSystemDirectoryHandle | undefined;
+  if (sessions) ((await permission(sessions)) === "granted" ? ready : needPermission).sessions = sessions;
+  const cache = await recall("cache");
+  let upgraded = false;
+  if (Array.isArray(cache)) {
+    const states = await Promise.all(cache.map(permission));
+    (states.every((s) => s === "granted") ? ready : needPermission).cache = cache;
+  } else if (cache) {
+    upgraded = true;
+    await forget("cache");
   }
-  return { ready, needPermission };
+  return { ready, needPermission, upgraded };
 }
 
-/** Asks again for permission to read a remembered folder: needs a click */
-export async function reconnect(dir: FileSystemDirectoryHandle): Promise<boolean> {
-  const state = await (dir as unknown as { requestPermission: (o: object) => Promise<PermissionState> }).requestPermission({ mode: "read" });
-  return state === "granted";
+/** Asks again for permission to read what was connected before: needs a click */
+export async function reconnect(what: FileSystemDirectoryHandle | FileSystemFileHandle[]): Promise<boolean> {
+  for (const h of Array.isArray(what) ? what : [what]) {
+    if ((await permission(h)) === "granted") continue;
+    // The browser's prompt restores everything the page had before, so this usually asks once
+    if ((await (h as unknown as Permissioned).requestPermission({ mode: "read" })) !== "granted") return false;
+  }
+  return true;
 }
 
-/** Forgets both folders: the browser no longer lets the page read them */
+/** Forgets both: the browser no longer lets the page read them */
 export async function forgetFolders(): Promise<void> {
+  for (const kind of ["sessions", "cache"] as const) await forget(kind);
+}
+
+async function forget(kind: FolderKind): Promise<void> {
   const db = await openDb();
-  for (const kind of ["sessions", "cache"]) await request(db.transaction(STORE, "readwrite").objectStore(STORE).delete(kind));
+  await request(db.transaction(STORE, "readwrite").objectStore(STORE).delete(kind));
 }
 
 /** Recordings in the sessions folder, newest first */
@@ -124,12 +172,15 @@ export async function readSession(sessions: FileSystemDirectoryHandle, name: str
  * The game cache as a CacheSource, reporting each read. RuneLite may update the cache while it runs,
  * which makes a file the browser opened earlier unreadable: it's opened again then
  */
-export function cacheSource(cache: FileSystemDirectoryHandle, onRead: (name: string, bytes: number) => void): CacheSource {
+export function cacheSource(cache: FileSystemFileHandle[], onRead: (name: string, bytes: number) => void): CacheSource {
+  const handles = new Map(cache.filter((h) => CACHE_FILE.test(h.name)).map((h) => [h.name, h]));
   const files = new Map<string, File>();
   const file = async (name: string, fresh = false) => {
     let f = fresh ? undefined : files.get(name);
     if (!f) {
-      f = await (await cache.getFileHandle(name)).getFile();
+      const handle = handles.get(name);
+      if (!handle) throw new Error(`${name} wasn't among the game cache files chosen`);
+      f = await handle.getFile();
       files.set(name, f);
     }
     return f;
@@ -158,15 +209,15 @@ export function cacheSource(cache: FileSystemDirectoryHandle, onRead: (name: str
   };
 }
 
-async function store(kind: FolderKind, dir: FileSystemDirectoryHandle): Promise<void> {
+async function store(kind: FolderKind, what: FileSystemDirectoryHandle | FileSystemFileHandle[]): Promise<void> {
   const db = await openDb();
-  await request(db.transaction(STORE, "readwrite").objectStore(STORE).put(dir, kind));
+  await request(db.transaction(STORE, "readwrite").objectStore(STORE).put(what, kind));
 }
 
-async function recall(kind: FolderKind): Promise<FileSystemDirectoryHandle | undefined> {
+async function recall(kind: FolderKind): Promise<FileSystemDirectoryHandle | FileSystemFileHandle[] | undefined> {
   try {
     const db = await openDb();
-    return (await request(db.transaction(STORE).objectStore(STORE).get(kind))) as FileSystemDirectoryHandle | undefined;
+    return (await request(db.transaction(STORE).objectStore(STORE).get(kind))) as FileSystemDirectoryHandle | FileSystemFileHandle[] | undefined;
   } catch {
     return undefined;
   }

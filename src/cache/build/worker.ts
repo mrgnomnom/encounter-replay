@@ -5,13 +5,13 @@ import { devSource } from "./devSource";
 
 /**
  * Builds a session's bundle off the page's thread: reading the cache and decoding models takes long
- * enough to freeze the replay otherwise. Folder handles can be passed to workers. Which cache files were
+ * enough to freeze the replay otherwise. File handles can be passed to workers. Which cache files were
  * read, and how much of each, goes back with every message for the page to show.
  */
 
 export interface BuildRequest {
-  /** The game cache folder, or in development the dev server's copy of it */
-  cache: FileSystemDirectoryHandle | string;
+  /** The game cache's files, or in development the dev server's copy of the cache */
+  cache: FileSystemFileHandle[] | string;
   session: string;
 }
 

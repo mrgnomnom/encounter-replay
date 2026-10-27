@@ -30,12 +30,13 @@ a skilling trip: anything you can see in game, you can watch again.
 
 ## Your files never leave your computer
 
-- **It reads two folders, view-only:** your recordings and RuneLite's copy of the game cache. It turns
-  away your whole `.runelite` folder, because that also holds your logins.
+- **It reads only what it needs, view-only:** your recordings folder, and the game cache's own files
+  (`main_file_cache`). Not the rest of the cache's folder, which can hold your game settings and a
+  remembered username, and never your whole `.runelite` folder, which also holds your logins.
 - **It can't send anything anywhere.** The page's security policy tells your browser to block every
   connection except loading the page itself, so nothing is ever uploaded.
 - **It draws the game from your own game files.** No game data is downloaded or hosted.
-- **"What this page can see"** in the header lists the folders it has and every file it has read.
+- **"What this page can see"** in the header lists what it can read and every file it has read.
 - **It's free.** There are no accounts, no ads and no analytics. It even works offline after your first
   visit.
 

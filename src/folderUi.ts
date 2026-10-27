@@ -1,5 +1,5 @@
 import {
-  FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickFolder, reconnect, rememberedFolders,
+  FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickCacheFiles, pickSessionsFolder, reconnect, rememberedFolders,
   type FolderKind, type Folders,
 } from "./runeliteFolder";
 import { githubLink, kofiButton } from "./support";
@@ -25,6 +25,8 @@ const pathOf = (kind: FolderKind) => FOLDER_PATHS[kind][isWindows() ? "windows" 
 export class FolderUi {
   folders: Folders = {};
   private needPermission: Folders = {};
+  /** The cache was connected as a whole folder before: that access was dropped, for its files instead */
+  private upgraded = false;
   private readonly landing = document.getElementById("landing") as HTMLElement;
   private readonly dialog = document.getElementById("folderDialog") as HTMLDialogElement;
   private readonly privacy = document.getElementById("privacyDialog") as HTMLDialogElement;
@@ -43,9 +45,10 @@ export class FolderUi {
     // The landing page shows at once, so the replay never flashes up behind it while the browser looks
     // up the folders it remembers
     if (!skipLanding) this.showLanding();
-    const { ready, needPermission } = await rememberedFolders();
+    const { ready, needPermission, upgraded } = await rememberedFolders();
     this.folders = ready;
     this.needPermission = needPermission;
+    this.upgraded = upgraded;
     this.refreshButton();
     if (skipLanding) return;
     if (this.folders.cache) this.hideLanding();
@@ -89,10 +92,10 @@ export class FolderUi {
       };
       card.append(el("h2", "Welcome back"), el("p", "Your browser asks once per visit before the replay may read the game cache again."), allow, error);
     } else {
-      const choose = el("button", "Choose folder…", "primary big");
+      const choose = el("button", "Choose files…", "primary big");
       choose.onclick = async () => {
         try {
-          this.cacheConnected(await pickFolder("cache"));
+          this.cacheConnected(await pickCacheFiles());
         } catch (e) {
           // Cancelling the picker isn't worth a message
           if (!(e instanceof DOMException && e.name === "AbortError")) error.textContent = e instanceof Error ? e.message : String(e);
@@ -102,11 +105,14 @@ export class FolderUi {
       steps.append(
         step("Copy the game cache's location", copyField(pathOf("cache"))),
         step(isWindows()
-          ? "Click Choose folder, paste the location into the address bar at the top of the window, press Enter, then click Select Folder"
-          : "Click Choose folder, press Cmd+Shift+G, paste the location, press Enter, then click Select", choose, error),
-        step("When the browser asks, click View files"),
+          ? "Click Choose files, paste the location into the address bar at the top of the window and press Enter"
+          : "Click Choose files, press Cmd+Shift+G, paste the location and press Enter", choose, error),
+        step(isWindows() ? "Press Ctrl+A to select every file it lists, then click Open" : "Press Cmd+A to select every file it lists, then click Open"),
       );
-      card.append(el("h2", "One-time Game Cache Setup"), el("p", "This allows us to render the game properly", "muted"), steps);
+      const why = "Only the game's own files (main_file_cache) are listed: the page never gets the rest of that folder, which can hold your game settings and a remembered username.";
+      card.append(el("h2", "One-time Game Cache Setup"), el("p", "This allows us to render the game properly", "muted"));
+      if (this.upgraded) card.append(el("p", "The page now asks for just the game cache's files instead of its whole folder, so it can't even see anything else in there. Please choose them once more.", "landing-note"));
+      card.append(steps, el("p", why, "muted"));
     }
     // At the bottom of the screen, out of the way of the setup
     const support = el("div", "", "landing-support");
@@ -119,8 +125,9 @@ export class FolderUi {
     document.body.classList.remove("landing-open");
   }
 
-  private cacheConnected(dir: FileSystemDirectoryHandle): void {
-    this.folders.cache = dir;
+  private cacheConnected(files: FileSystemFileHandle[]): void {
+    this.folders.cache = files;
+    this.upgraded = false;
     delete this.needPermission.cache;
     this.hideLanding();
     this.refreshButton();
@@ -146,7 +153,7 @@ export class FolderUi {
           if (!(await reconnect(again))) return;
           this.folders.sessions = again;
         } else {
-          this.folders.sessions = await pickFolder("sessions");
+          this.folders.sessions = await pickSessionsFolder();
         }
         delete this.needPermission.sessions;
         this.refreshButton();
@@ -186,15 +193,15 @@ export class FolderUi {
   /** The folders it was given, every file it has read, and what it can't do */
   showPrivacy(): void {
     const folders = el("ul");
-    for (const kind of ["cache", "sessions"] as const) {
-      const dir = this.folders[kind];
-      folders.append(el("li", `${LABELS[kind].title}: ${dir ? `"${dir.name}" folder, view only` : "not connected"}`));
-    }
+    const cache = this.folders.cache;
+    folders.append(el("li", `${LABELS.cache.title}: ${cache ? `${cache.length} files (main_file_cache.dat2 and its .idx files), view only. Nothing else in their folder` : "not connected"}`));
+    const sessions = this.folders.sessions;
+    folders.append(el("li", `${LABELS.sessions.title}: ${sessions ? `"${sessions.name}" folder, view only` : "not connected"}`));
     const files = el("ul", "", "files-read");
     const sorted = [...filesRead].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
     for (const [name, bytes] of sorted) files.append(el("li", `${name} · ${formatBytes(bytes)}`));
     if (!sorted.length) files.append(el("li", "Nothing yet", "muted"));
-    const forget = el("button", "Forget both folders");
+    const forget = el("button", "Forget both");
     forget.onclick = async () => {
       await forgetFolders();
       this.folders = {};
@@ -205,7 +212,7 @@ export class FolderUi {
     };
     this.privacy.replaceChildren(
       el("h2", "What this page can see"),
-      el("h3", "Folders"),
+      el("h3", "What it can read"),
       folders,
       el("h3", "Files read this visit"),
       files,
