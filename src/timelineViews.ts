@@ -30,6 +30,9 @@ export interface TimelineArea {
   x(t: number): number;
   /** How wide one tick's marks are */
   tickW: number;
+  /** Where the plot starts and ends across the canvas, inside any axis */
+  left: number;
+  right: number;
   /** Whose hits count: a key like "me", "n123", "p45" */
   followKey: string;
   outcomesByTick: Map<number, Outcome[]>;
@@ -39,12 +42,16 @@ export interface TimelineView {
   id: string;
   name: string;
   help: string;
+  /** Room kept at the left for an axis, in CSS pixels */
+  axisWidth?: number;
   legend(followKey: string): LegendItem[];
   draw(ctx: CanvasRenderingContext2D, a: TimelineArea): void;
   /** The lines a point at tick t stands for, f being how far down the timeline it is (0 at the top) */
   linesAt(a: TimelineArea, t: number, f: number): Line[];
-  /** A line about tick t for the hover tooltip */
+  /** A line about tick t for the hover tooltip; a view with notes shows the tooltip on every tick */
   note?(a: TimelineArea, t: number): string | undefined;
+  /** Picks out tick t while the pointer is over it, drawn over the view */
+  drawHover?(ctx: CanvasRenderingContext2D, a: TimelineArea, t: number): void;
 }
 
 // ---------- Tick events: clicks the server took late, hits on whoever you follow, NPC animations ----------
@@ -161,99 +168,123 @@ export function rateAt(sum: Float64Array, t: number): number {
   return (sum[end] - sum[start]) / (RATE_TICKS * TICK_SECONDS);
 }
 
+/** How a damage view is laid out on the canvas: the rates' scale, and the strip of hits along the bottom */
+function damageLayout(a: TimelineArea, peak: number) {
+  const { H, dpr } = a;
+  const strip = Math.min(8 * dpr, Math.round(H * 0.18));
+  const bottom = H - strip - 2 * dpr;
+  const top = 7 * dpr;
+  const max = niceCeiling(Math.max(1, peak));
+  return { strip, bottom, top, max, y: (v: number) => bottom - (Math.min(v, max) / max) * (bottom - top) };
+}
+
+/** The highest rate in the stretch shown */
+function peakRate(a: TimelineArea, s: DamageSeries): number {
+  let peak = 0;
+  for (let t = a.from; t <= a.to; t++) peak = Math.max(peak, rateAt(s.dealtSum, t), rateAt(s.takenSum, t));
+  return peak;
+}
+
 const damage: TimelineView = {
   id: "damage",
   name: "Damage",
-  help: "Damage dealt by whoever you follow (above the middle) against damage they took (below), with how much per second over the last 6 seconds",
+  help: "Damage per second over the last 6 seconds: dealt by whoever you follow against damage they took, from 0 at the bottom. Each hit is a mark in the strip along the bottom",
+  axisWidth: 42,
   legend: (followKey) => [
     {
-      label: "dealt", color: DEALT_COLOR,
+      label: "dealt", color: DEALT_COLOR, line: true,
       help: followKey === "me"
-        ? "Damage you dealt: hitsplats the game marks as yours"
-        : "Damage they dealt with projectiles that landed. Other players' melee can't be told apart from anyone else's, so it isn't counted",
+        ? "Damage you dealt per second over the last 6 seconds: hitsplats the game marks as yours"
+        : "Damage they dealt per second over the last 6 seconds, from projectiles that landed. Other players' melee can't be told apart from anyone else's, so it isn't counted",
     },
-    { label: "taken", color: TAKEN_COLOR, help: "Damage on their hitsplats; heals left out" },
-    { label: "per second, last 6 s", color: "#ece8e1", line: true, help: "Lines: damage per second over the 6 seconds before each moment" },
+    { label: "taken", color: TAKEN_COLOR, line: true, help: "Damage they took per second over the last 6 seconds: their hitsplats, heals left out" },
+    { label: "hits", color: "#8d877d", top: true, help: "Along the bottom: each hit dealt (upper row) and taken (lower row)" },
   ],
   draw(ctx, a) {
-    const { from, to, W, H, dpr, x } = a;
+    const { from, to, dpr, x, left, right } = a;
     const s = damageSeries(a.session, a.followKey);
-    const mid = Math.round(H / 2);
-    const room = mid - 2 * dpr;
+    const { strip, bottom, top, max, y } = damageLayout(a, peakRate(a, s));
     const span = Math.max(1, to - from);
-    const spacing = (W - 8 * dpr) / span;
-    // Ticks thinner than two pixels are added up in buckets that wide
-    const bucketW = Math.max(spacing, 2 * dpr);
-    const perBucket = bucketW / spacing;
-    const buckets = Math.ceil((span + 1) / perBucket);
-    const dealt = new Float64Array(buckets);
-    const taken = new Float64Array(buckets);
-    for (let t = from; t <= to; t++) {
-      const b = Math.floor((t - from) / perBucket);
-      dealt[b] += s.dealt[t] ?? 0;
-      taken[b] += s.taken[t] ?? 0;
-    }
-    let most = 1;
-    for (let b = 0; b < buckets; b++) most = Math.max(most, dealt[b], taken[b]);
-    const barW = Math.max(dpr, bucketW * 0.8);
-    for (let b = 0; b < buckets; b++) {
-      const bx = x(from + b * perBucket);
-      if (dealt[b]) { ctx.fillStyle = withAlpha(DEALT_COLOR, 0.55); const h = Math.max(dpr, (dealt[b] / most) * room); ctx.fillRect(bx, mid - h, barW, h); }
-      if (taken[b]) { ctx.fillStyle = withAlpha(TAKEN_COLOR, 0.55); const h = Math.max(dpr, (taken[b] / most) * room); ctx.fillRect(bx, mid + dpr, barW, h); }
-    }
-    ctx.fillStyle = "#3a3732";
-    ctx.fillRect(0, mid, W, dpr);
+    const spacing = (right - left) / span;
 
-    // The rates, sampled every other pixel, on their own scale
+    // The axis: 0 at the bottom, the top of the scale, and halfway when there's room
+    const levels = a.H / dpr >= 60 ? [0, max / 2, max] : [0, max];
+    ctx.font = `${10 * dpr}px sans-serif`;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (const v of levels) {
+      ctx.fillStyle = v === 0 ? "#4a463f" : "#2f2c28";
+      ctx.fillRect(left, Math.round(y(v)), right - left, dpr);
+      ctx.fillStyle = "#c9c3b8";
+      ctx.fillText(v === 0 ? "0" : `${formatRate(v)}/s`, left - 6 * dpr, Math.min(bottom, Math.max(top, y(v))));
+    }
+    ctx.fillStyle = "#4a463f";
+    ctx.fillRect(left - 2 * dpr, top, dpr, bottom - top);
+
+    // The rates, one sample every other pixel, filled lightly underneath
     const step = 2 * dpr;
-    const samples: [number, number, number][] = [];
-    let peak = 0;
-    for (let px = x(from); px <= x(to) + 0.5; px += step) {
-      const t = from + (px - x(from)) / spacing;
-      const d = rateAt(s.dealtSum, t);
-      const k = rateAt(s.takenSum, t);
-      peak = Math.max(peak, d, k);
-      samples.push([px, d, k]);
-    }
-    if (peak > 0) {
+    for (const [sum, color] of [[s.takenSum, TAKEN_COLOR], [s.dealtSum, DEALT_COLOR]] as const) {
+      const points: [number, number][] = [];
+      for (let px = x(from); px <= x(to) + 0.5; px += step) points.push([px, y(rateAt(sum, from + (px - x(from)) / spacing))]);
+      if (points.every((p) => p[1] >= bottom)) continue;
+      ctx.fillStyle = withAlpha(color, 0.16);
+      ctx.beginPath();
+      ctx.moveTo(points[0][0], bottom);
+      for (const [px, py] of points) ctx.lineTo(px, py);
+      ctx.lineTo(points[points.length - 1][0], bottom);
+      ctx.fill();
+      ctx.strokeStyle = color;
       ctx.lineWidth = 1.5 * dpr;
-      for (const [i, color, sign] of [[1, DEALT_COLOR, -1], [2, TAKEN_COLOR, 1]] as const) {
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        // Nothing on either side: no line, so it doesn't paint over the middle
-        samples.forEach((p, n) => {
-          const y = mid + sign * (p[i] / peak) * room;
-          if (n === 0 || (p[i] === 0 && samples[n - 1][i] === 0)) ctx.moveTo(p[0], y);
-          else ctx.lineTo(p[0], y);
-        });
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      points.forEach(([px, py], n) => (n ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+      ctx.stroke();
     }
-    // Tall enough to read: what each half is, and the scale of the lines
-    if (H / dpr >= 70) {
-      ctx.font = `${10 * dpr}px sans-serif`;
-      ctx.fillStyle = "#8d877d";
-      ctx.textBaseline = "top";
-      ctx.fillText("dealt", 8 * dpr, 4 * dpr);
-      ctx.textBaseline = "bottom";
-      ctx.fillText("taken", 8 * dpr, H - 4 * dpr);
-      ctx.textAlign = "right";
-      ctx.textBaseline = "top";
-      ctx.fillText(`line peak ${peak.toFixed(1)}/s · tallest bar ${most}`, W - 8 * dpr, 4 * dpr);
-      ctx.textAlign = "left";
+
+    // Each hit: dealt in the upper row of the strip, taken in the lower
+    const row = Math.max(dpr, Math.floor(strip / 2));
+    const markW = Math.max(dpr, a.tickW);
+    for (let t = from; t <= to; t++) {
+      if (s.dealt[t]) { ctx.fillStyle = DEALT_COLOR; ctx.fillRect(x(t), a.H - 2 * row, markW, row - (row > 2 * dpr ? dpr : 0)); }
+      if (s.taken[t]) { ctx.fillStyle = TAKEN_COLOR; ctx.fillRect(x(t), a.H - row, markW, row); }
     }
+    ctx.textAlign = "left";
   },
-  linesAt(a, t, f) {
+  linesAt(a, t) {
     const hits = a.session.events(t).filter((l) => l.e === "hit");
-    const dealt = hits.filter((l) => dealtBy(a.session, l, a.followKey));
-    const taken = hits.filter((l) => takenBy(l, a.followKey));
-    return f < 0.5 ? [...dealt, ...taken] : [...taken, ...dealt];
+    return [...hits.filter((l) => dealtBy(a.session, l, a.followKey)), ...hits.filter((l) => takenBy(l, a.followKey))];
   },
   note(a, t) {
     const s = damageSeries(a.session, a.followKey);
-    return `dealt ${s.dealt[t] ?? 0} · taken ${s.taken[t] ?? 0}\nlast 6 s: ${rateAt(s.dealtSum, t).toFixed(1)}/s dealt · ${rateAt(s.takenSum, t).toFixed(1)}/s taken`;
+    return `last 6 s: dealt ${formatRate(rateAt(s.dealtSum, t))}/s · taken ${formatRate(rateAt(s.takenSum, t))}/s\nthis tick: dealt ${s.dealt[t] ?? 0} · taken ${s.taken[t] ?? 0}`;
+  },
+  drawHover(ctx, a, t) {
+    const s = damageSeries(a.session, a.followKey);
+    const { bottom, top, y } = damageLayout(a, peakRate(a, s));
+    const { dpr } = a;
+    const cx = a.x(t) + a.tickW / 2;
+    ctx.fillStyle = "rgba(236, 232, 225, 0.55)";
+    ctx.fillRect(Math.round(cx), top, dpr, bottom - top);
+    for (const [sum, color] of [[s.takenSum, TAKEN_COLOR], [s.dealtSum, DEALT_COLOR]] as const) {
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "#171614";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(cx, y(rateAt(sum, t)), 3.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   },
 };
+
+/** The smallest of 1, 2, 2.5, 5 and 10 times a power of ten at or above v, for a readable axis */
+export function niceCeiling(v: number): number {
+  const p = 10 ** Math.floor(Math.log10(v));
+  return ([1, 2, 2.5, 5, 10].find((m) => m * p >= v - 1e-9) ?? 10) * p;
+}
+
+function formatRate(v: number): string {
+  return v >= 10 || Number.isInteger(v) ? String(Math.round(v)) : v.toFixed(1);
+}
 
 export const VIEWS: TimelineView[] = [tickEvents, damage];
 

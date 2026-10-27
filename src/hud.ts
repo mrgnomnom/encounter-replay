@@ -11,6 +11,8 @@ import { VIEWS, type TimelineArea, type TimelineView } from "./timelineViews";
 
 const PRAYER_INTERFACE = 541;
 const MARK_COLOR = "#b08cf0";
+// Room at each end of the timeline, in CSS pixels, so marks on the first and last ticks aren't cut off
+const PLOT_INSET = 4;
 const MAX_TICK_CHIPS = 12;
 
 /**
@@ -77,6 +79,8 @@ export class Hud {
   private zoom: { from: number; to: number } | null = null;
   /** What the timeline shows: tick events, damage... */
   private timelineView: TimelineView = VIEWS[0];
+  /** The tick under the pointer on the timeline, for views that pick it out */
+  private hoverTick: number | undefined;
   private accuracyPoints: ClickPoint[] | undefined;
   private readonly outcomeOf = new Map<Line, Outcome>();
 
@@ -396,13 +400,16 @@ export class Hud {
         if (lines.length) return { t, lines, note: this.timelineView.note?.(area, t) };
       }
     }
-    return undefined;
+    // Views with something to say about every tick say it wherever the pointer is
+    const note = this.timelineView.note?.(area, centre);
+    return note ? { t: centre, lines: [], note } : undefined;
   }
 
   /** Hovering the timeline: a small tooltip, and the lines lit in the log when they're on screen */
   showMarkHover(session: Session, hit: { t: number; lines: Line[]; note?: string } | undefined, clientX: number, clientY: number): void {
     const tip = $("timelineTip");
     for (const row of this.logRows.values()) row.classList.remove("tl-hover");
+    this.hoverTick = hit?.t;
     if (!hit) {
       tip.hidden = true;
       return;
@@ -410,7 +417,7 @@ export class Hud {
     tip.hidden = false;
     const shown = hit.lines.slice(0, 3).map((l) => describe(session, l));
     if (hit.lines.length > 3) shown.push(`and ${hit.lines.length - 3} more`);
-    tip.textContent = [`tick ${hit.t}`, ...(hit.note ? [hit.note] : []), ...shown].join("\n");
+    tip.textContent = [`tick ${hit.t} · ${(hit.t * 0.6).toFixed(1)} s`, ...(hit.note ? [hit.note] : []), ...shown].join("\n");
     const wrap = $("timelineWrap").getBoundingClientRect();
     tip.style.left = `${Math.min(wrap.width - 220, Math.max(0, clientX - wrap.left - 20))}px`;
     tip.style.bottom = `${wrap.bottom - clientY + 14}px`;
@@ -468,7 +475,8 @@ export class Hud {
   tickAtX(session: Session, clientX: number): number {
     const r = $("timeline").getBoundingClientRect();
     const [from, to] = this.range(session);
-    const p = Math.min(1, Math.max(0, (clientX - r.left - 4) / (r.width - 8)));
+    const [left, right] = this.insets();
+    const p = Math.min(1, Math.max(0, (clientX - r.left - left) / (r.width - left - right)));
     return Math.round(from + p * (to - from));
   }
 
@@ -476,7 +484,8 @@ export class Hud {
   xOfTick(session: Session, tick: number): number {
     const r = $("timeline").getBoundingClientRect();
     const [from, to] = this.range(session);
-    return r.left + 4 + ((r.width - 8) * (tick - from)) / Math.max(1, to - from);
+    const [left, right] = this.insets();
+    return r.left + left + ((r.width - left - right) * (tick - from)) / Math.max(1, to - from);
   }
 
   /** Shows the stretch being dragged out, or hides it */
@@ -514,6 +523,11 @@ export class Hud {
     return this.timelineView.id;
   }
 
+  /** Where the timeline's ticks start and end, in CSS pixels in from each side: past any axis on the left */
+  private insets(): [number, number] {
+    return [PLOT_INSET + (this.timelineView.axisWidth ?? 0), PLOT_INSET];
+  }
+
   /** The canvas and the stretch it shows, for the view to draw on */
   private area(session: Session): TimelineArea {
     const canvas = $<HTMLCanvasElement>("timeline");
@@ -521,11 +535,14 @@ export class Hud {
     const W = canvas.width;
     const [from, to] = this.range(session);
     const span = Math.max(1, to - from);
+    const [l, r] = this.insets();
+    const left = l * dpr;
+    const right = W - r * dpr;
     return {
-      session, from, to, W, H: canvas.height, dpr,
-      x: (t) => 4 * dpr + ((W - 8 * dpr) * (t - from)) / span,
+      session, from, to, W, H: canvas.height, dpr, left, right,
+      x: (t) => left + ((right - left) * (t - from)) / span,
       // Zoomed in, each tick's marks widen to fill its share of the timeline
-      tickW: Math.max(dpr, ((W - 8 * dpr) / span) * 0.8),
+      tickW: Math.max(dpr, ((right - left) / span) * 0.8),
       followKey: this.followKey,
       outcomesByTick: this.outcomesByTick,
     };
@@ -580,12 +597,12 @@ export class Hud {
     const ctx = canvas.getContext("2d")!;
     const dpr = window.devicePixelRatio || 1;
     ctx.putImageData(this.timelineBase, 0, 0);
-    const [from, to] = this.range(session);
+    const a = this.area(session);
+    if (this.hoverTick !== undefined && this.hoverTick >= a.from && this.hoverTick <= a.to) this.timelineView.drawHover?.(ctx, a, this.hoverTick);
     // Outside a zoomed stretch the playhead isn't drawn
-    if (position < from || position > to) return;
-    const x = 4 * dpr + ((canvas.width - 8 * dpr) * (position - from)) / Math.max(1, to - from);
+    if (position < a.from || position > a.to) return;
     ctx.fillStyle = "#ece8e1";
-    ctx.fillRect(x - dpr, 0, 2 * dpr, canvas.height);
+    ctx.fillRect(a.x(position) - dpr, 0, 2 * dpr, canvas.height);
   }
 }
 

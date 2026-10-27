@@ -810,10 +810,25 @@ function setTimelineHeight(px: number): number {
 }
 setTimelineHeight(Number(sizes.get("timeline")) || recall("replay.timelineHeight") || TIMELINE_SHORT);
 dragEdge($("timelineGrip"), (e) => setTimelineHeight(e.clientY - timeline.getBoundingClientRect().top), "replay.timelineHeight");
-$("timelineGrip").ondblclick = () => {
-  const now = timeline.getBoundingClientRect().height;
-  remember("replay.timelineHeight", setTimelineHeight(now > TIMELINE_SHORT + 10 ? TIMELINE_SHORT : TIMELINE_TALL));
-};
+// From the top, the timeline grows upwards: the bottom panel grows by as much, so the log keeps its size
+let topDrag: { y: number; timeline: number; foot: number } | undefined;
+$("timelineGripTop").addEventListener("pointerdown", (e) => {
+  topDrag = { y: e.clientY, timeline: timeline.getBoundingClientRect().height, foot: $("timelineWrap").closest("footer")!.getBoundingClientRect().height };
+});
+dragEdge($("timelineGripTop"), (e) => {
+  if (!topDrag) return 0;
+  const h = setTimelineHeight(topDrag.timeline + topDrag.y - e.clientY);
+  setFoot(topDrag.foot + h - topDrag.timeline);
+  remember("replay.footHeight", topDrag.foot + h - topDrag.timeline);
+  if (session) hud.drawTimeline(session);
+  return h;
+}, "replay.timelineHeight");
+for (const grip of ["timelineGrip", "timelineGripTop"]) {
+  $(grip).ondblclick = () => {
+    const now = timeline.getBoundingClientRect().height;
+    remember("replay.timelineHeight", setTimelineHeight(now > TIMELINE_SHORT + 10 ? TIMELINE_SHORT : TIMELINE_TALL));
+  };
+}
 // ?demo opens the demo recording; ?t=12.5 jumps to a moment in it, e.g. for screenshots; ?focus=n123
 // follows that actor instead of you and ?zoom=8 sets how far away the camera starts
 pendingFocus = params.get("focus") ?? undefined;

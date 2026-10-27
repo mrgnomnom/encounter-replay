@@ -209,8 +209,9 @@ footer { border-top: 1px solid var(--line); padding: 8px 16px; display: flex; fl
 .timeline-grip { height: 6px; margin-top: -3px; position: relative; z-index: 2; cursor: row-resize; }
 .timeline-grip::after { content: ""; position: absolute; left: 50%; top: 2px; width: 36px; height: 2px; margin-left: -18px; border-radius: 1px; background: var(--line); }
 .timeline-grip:hover::after, .timeline-grip.dragging::after { background: var(--muted); }
+.timeline-grip.top { margin: -4px 0 -2px; }
 .timeline-sel { position: absolute; top: 0; bottom: 0; background: rgba(255, 225, 77, 0.18); border: 1px solid rgba(255, 225, 77, 0.8); border-radius: 3px; pointer-events: none; }
-.zoom-label { position: absolute; left: 6px; top: -1px; font-size: 10px; color: var(--muted); background: var(--panel); padding: 0 4px; border-radius: 0 0 3px 3px; pointer-events: none; }
+.zoom-label { position: absolute; right: 26px; top: 2px; font-size: 10px; color: var(--muted); background: var(--panel); padding: 0 4px; border-radius: 0 0 3px 3px; pointer-events: none; }
 .timeline-tip { position: absolute; z-index: 6; max-width: 240px; white-space: pre; overflow: hidden; text-overflow: ellipsis;
   background: #111; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font-size: 10.5px; line-height: 1.35; pointer-events: none; }
 #log .tl-hover { background: rgba(60, 192, 168, 0.22); }
