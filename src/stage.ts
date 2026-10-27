@@ -55,6 +55,7 @@ class ActorView {
   private readonly lines: HTMLDivElement;
   private readonly hpBar: HTMLDivElement;
   private readonly hpFill: HTMLDivElement;
+  private readonly hpText: HTMLDivElement;
   private readonly splats: HTMLDivElement;
   private shownSplats = "";
   /** Where the label (and its hitsplats) sits above the ground */
@@ -97,6 +98,7 @@ class ActorView {
     this.lines = element("lines", tag);
     this.hpBar = element("hp", tag);
     this.hpFill = element("fill", this.hpBar);
+    this.hpText = element("pct", this.hpBar);
     this.splats = element("splats", tag);
     this.label = new CSS2DObject(tag);
     this.labelHeight = height + 0.25;
@@ -153,7 +155,13 @@ class ActorView {
     this.lines.textContent = info.lines.join("\n");
     const hp = frame.state.hp;
     this.hpBar.style.display = hp ? "" : "none";
-    if (hp) this.hpFill.style.width = `${(100 * hp[0]) / Math.max(1, hp[1])}%`;
+    if (hp) {
+      // The game's own bar, as a share of its segments: a percentage, since the exact HP isn't sent
+      const share = (100 * hp[0]) / Math.max(1, hp[1]);
+      this.hpFill.style.width = `${share}%`;
+      // Never 0% while it's alive: the game keeps a sliver of bar until the end
+      this.hpText.textContent = `${hp[0] > 0 ? Math.max(1, Math.round(share)) : 0}%`;
+    }
     // Rebuilt only when the hitsplats change; the hovered one pulses in size every frame
     const splatKey = info.hits.map((h) => `${h.c}:${h.amount}:${h === info.pulseHit}`).join("|");
     if (splatKey === this.shownSplats) {
@@ -553,7 +561,11 @@ export class Stage {
   private describe(session: Session, f: ActorFrame, t: number): string[] {
     const s = f.state;
     const lines: string[] = [];
-    if (f.kind === "npc") lines.push(session.npcName((s.who as { id: number }).id));
+    if (f.kind === "npc") {
+      // NPCs the game never names get no name over their heads, as in game
+      const name = session.npcShownName(s.who as { i: number; id: number }, t);
+      if (name) lines.push(name);
+    }
     // Players by name, as above their heads in game; recordings without names give their index
     else if (f.kind === "player") lines.push(session.label(s.who, t));
     else if (session.you) lines.push(session.you);

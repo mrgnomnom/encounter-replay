@@ -104,6 +104,11 @@ export class Session {
   readonly scenes: Line[];
   readonly npcNames = new Map<number, string>();
   readonly npcSizes = new Map<number, number>();
+  /**
+   * The forms each NPC index took, in order: the ID it had from tick t, and whether it spawned then. An
+   * index is reused once its NPC has gone, so a spawn starts a new NPC
+   */
+  private readonly npcForms = new Map<number, { t: number; id: number; spawn: boolean }[]>();
   readonly itemNames = new Map<number, string>();
   readonly unreadable: number;
   private readonly items = new Map<string, Line[]>();
@@ -126,6 +131,12 @@ export class Session {
       if (l.e === "scene") scene = l;
       else scenePlanes(l, scene);
       this.byTick[l.t ?? 0].push(l);
+      if (l.who?.k === "npc" && l.who.id != null) {
+        const forms = this.npcForms.get(l.who.i) ?? [];
+        const spawn = l.e === "npc_spawn";
+        if (spawn || forms[forms.length - 1]?.id !== l.who.id) forms.push({ t: l.t ?? 0, id: l.who.id, spawn });
+        this.npcForms.set(l.who.i, forms);
+      }
       switch (l.e) {
         case "header":
           header = l;
@@ -240,8 +251,32 @@ export class Session {
     return this.tickAt(t)?.ui?.tab ?? event?.tab ?? 3;
   }
 
+  /**
+   * An NPC definition's name. Some are "null" in the game's data: the game never names those (effects,
+   * hazards, a boss between forms), so they're "unnamed NPC" rather than "null"
+   */
   npcName(id: number): string {
-    return this.npcNames.get(id) ?? `NPC ${id}`;
+    const name = this.npcNames.get(id);
+    if (name === undefined) return `NPC ${id}`;
+    return isUnnamed(name) ? `unnamed NPC ${id}` : name;
+  }
+
+  /**
+   * The name to show for an NPC at tick t: its own, or, in a form the game doesn't name, the name it had
+   * in an earlier form (a boss between phases is still the boss). Nothing for NPCs the game never names
+   */
+  npcShownName(ref: { i: number; id: number }, t = Infinity): string | undefined {
+    const own = this.npcNames.get(ref.id);
+    if (own !== undefined && !isUnnamed(own)) return own;
+    const forms = this.npcForms.get(ref.i) ?? [];
+    let at = forms.length - 1;
+    while (at >= 0 && forms[at].t > t) at--;
+    for (; at >= 0; at--) {
+      const name = this.npcNames.get(forms[at].id);
+      if (name !== undefined && !isUnnamed(name)) return name;
+      if (forms[at].spawn) break;
+    }
+    return own === undefined ? `NPC ${ref.id}` : undefined;
   }
 
   itemName(id: number): string {
@@ -266,7 +301,7 @@ export class Session {
       case "me":
         return this.ownName ? `${this.ownName} (you)` : "you";
       case "npc":
-        return `${this.npcName(ref.id)}#${ref.i}`;
+        return `${this.npcShownName(ref, t) ?? this.npcName(ref.id)}#${ref.i}`;
       case "player":
         // Recordings made before names were recorded only know players by index
         return this.playerName(ref.i, t) ?? `Player ${ref.i}`;
@@ -376,4 +411,9 @@ export function latestAtOrBefore(list: Line[], t: number): Line | undefined {
     }
   }
   return found;
+}
+
+/** The game's placeholder name for NPCs it never names */
+function isUnnamed(name: string): boolean {
+  return !name || name === "null";
 }

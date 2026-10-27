@@ -115,3 +115,29 @@ describe("Session", () => {
     expect(latestAtOrBefore(list, -1)).toBeUndefined();
   });
 });
+
+describe("NPC names", () => {
+  const boss = (id: number) => ({ k: "npc" as const, i: 9, id });
+  const session = Session.parse([
+    { t: 0, c: 1, e: "header", format: 5, label: "Test" },
+    { t: 0, c: 1, e: "npcdef", def: { id: 1, name: "Ocellus", size: 3 } },
+    { t: 0, c: 1, e: "npcdef", def: { id: 2, name: "null", size: 3 } },
+    { t: 0, c: 1, e: "npcdef", def: { id: 3, name: "null", size: 1 } },
+    { t: 0, c: 1, e: "npc_spawn", who: boss(1), x: 0, y: 0 },
+    { t: 5, c: 150, e: "npc_changed", who: boss(2), from: 1 },
+    { t: 6, c: 180, e: "npc_gone", who: boss(2) },
+    // The index is reused by a hazard the game never names
+    { t: 8, c: 240, e: "npc_spawn", who: { k: "npc", i: 9, id: 3 }, x: 1, y: 1 },
+  ].map((l) => JSON.stringify(l)).join("\n"));
+
+  it("keeps a boss's name through a form the game doesn't name", () => {
+    expect(session.npcShownName(boss(2), 5)).toBe("Ocellus");
+    expect(session.label(boss(2), 5)).toBe("Ocellus#9");
+  });
+
+  it("names nothing the game never names, and never says null", () => {
+    expect(session.npcShownName({ i: 9, id: 3 }, 8)).toBeUndefined();
+    expect(session.label({ k: "npc", i: 9, id: 3 } as never, 8)).toBe("unnamed NPC 3#9");
+    expect(session.npcName(2)).toBe("unnamed NPC 2");
+  });
+});
