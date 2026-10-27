@@ -200,9 +200,15 @@ footer { border-top: 1px solid var(--line); padding: 8px 16px; display: flex; fl
 .legend > span { display: inline-flex; align-items: center; gap: 4px; }
 .legend i { display: inline-block; width: 8px; height: 10px; border-radius: 2px; }
 .legend i.top { height: 4px; align-self: flex-start; margin-top: 2px; }
+.legend i.line { width: 12px; height: 2px; }
+#timelineView { font-size: 11px; padding: 1px 4px; }
 .transport .tick { font-variant-numeric: tabular-nums; min-width: 170px; }
 .timeline-wrap { position: relative; }
-#timeline { width: 100%; height: 34px; display: block; cursor: crosshair; border: 1px solid var(--line); border-radius: 4px; }
+#timeline { width: 100%; height: var(--timeline-h, 34px); display: block; cursor: crosshair; border: 1px solid var(--line); border-radius: 4px; }
+/* Under the timeline: drag to make it taller, for views with more to show */
+.timeline-grip { height: 6px; margin-top: -3px; position: relative; z-index: 2; cursor: row-resize; }
+.timeline-grip::after { content: ""; position: absolute; left: 50%; top: 2px; width: 36px; height: 2px; margin-left: -18px; border-radius: 1px; background: var(--line); }
+.timeline-grip:hover::after, .timeline-grip.dragging::after { background: var(--muted); }
 .timeline-sel { position: absolute; top: 0; bottom: 0; background: rgba(255, 225, 77, 0.18); border: 1px solid rgba(255, 225, 77, 0.8); border-radius: 3px; pointer-events: none; }
 .zoom-label { position: absolute; left: 6px; top: -1px; font-size: 10px; color: var(--muted); background: var(--panel); padding: 0 4px; border-radius: 0 0 3px 3px; pointer-events: none; }
 .timeline-tip { position: absolute; z-index: 6; max-width: 240px; white-space: pre; overflow: hidden; text-overflow: ellipsis;

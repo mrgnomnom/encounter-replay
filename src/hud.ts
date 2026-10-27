@@ -2,15 +2,15 @@ import type { Bundle } from "./cache/bundle";
 import { GameUi } from "./gameui";
 import type { ClickPoint } from "./accuracy";
 import { targetsOf, type Target } from "./highlight";
-import { isOthersHit, isYourHit, landedProjectile } from "./hits";
+import { HEAL_HITSPLAT, isOthersHit, isYourHit, landedProjectile } from "./hits";
 import type { EffectLinks } from "./links";
 import { pendingAt, type Outcome, type OutcomeStatus } from "./outcomes";
 import { effectsOfActor, refOfKey, relatesTo } from "./relevance";
 import { refKey, stoppedTargeting, type Line, type Session } from "./session";
+import { VIEWS, type TimelineArea, type TimelineView } from "./timelineViews";
 
 const PRAYER_INTERFACE = 541;
-// The game's heal hitsplat, which isn't damage taken
-const HEAL_HITSPLAT = 6;
+const MARK_COLOR = "#b08cf0";
 const MAX_TICK_CHIPS = 12;
 
 /**
@@ -75,6 +75,8 @@ export class Hud {
   private outcomesByTick = new Map<number, Outcome[]>();
   /** The stretch of ticks the timeline shows, when zoomed in */
   private zoom: { from: number; to: number } | null = null;
+  /** What the timeline shows: tick events, damage... */
+  private timelineView: TimelineView = VIEWS[0];
   private accuracyPoints: ClickPoint[] | undefined;
   private readonly outcomeOf = new Map<Line, Outcome>();
 
@@ -376,39 +378,29 @@ export class Hud {
     if (hidden) log.appendChild(div("c", `${hidden} other line${hidden > 1 ? "s" : ""} hidden: untick "only lines about" to see them`));
   }
 
-  /** The lines a timeline mark at tick t in a row stands for */
-  marksAt(session: Session, t: number, row: MarkRow): Line[] {
-    const events = session.events(t);
-    if (row === "mark") return events.filter((l) => l.e === "mark");
-    if (row === "hit") return events.filter((l) => l.e === "hit" && l.who && refKey(l.who) === this.followKey);
-    if (row === "anim") return events.filter((l) => l.e === "anim" && l.who?.k === "npc" && l.a !== -1);
-    return (this.outcomesByTick.get(t) ?? []).filter((o) => o.status === "late" || o.status === "delayed" || o.status === "ignored" || o.status === "cancelled").map((o) => o.click);
-  }
-
   /**
-   * The timeline mark under a point: its tick and the lines it stands for. Zoomed out, a mark a few
-   * pixels either side still counts, since ticks are thinner than a pointer
+   * The timeline mark under a point: its tick and the lines it stands for, in whichever view is shown;
+   * markers and notes count in every view. Zoomed out, a mark a few pixels either side still counts,
+   * since ticks are thinner than a pointer. note is the view's own line about that tick
    */
-  markUnder(session: Session, clientX: number, clientY: number): { t: number; row: MarkRow; lines: Line[] } | undefined {
+  markUnder(session: Session, clientX: number, clientY: number): { t: number; lines: Line[]; note?: string } | undefined {
     const r = $("timeline").getBoundingClientRect();
     const f = (clientY - r.top) / r.height;
-    const rows: MarkRow[] = f < 0.26 ? ["click", "mark"] : f < 0.61 ? ["hit", "mark"] : ["anim", "mark"];
     const centre = this.tickAtX(session, clientX);
-    const [from, to] = this.range(session);
-    const reach = Math.max(1, Math.round((3 * (to - from)) / Math.max(1, r.width)));
+    const area = this.area(session);
+    const reach = Math.max(1, Math.round((3 * (area.to - area.from)) / Math.max(1, r.width)));
     for (let d = 0; d <= reach; d++) {
       for (const t of d === 0 ? [centre] : [centre - d, centre + d]) {
-        for (const row of rows) {
-          const lines = this.marksAt(session, t, row);
-          if (lines.length) return { t, row, lines };
-        }
+        const lines = this.timelineView.linesAt(area, t, f);
+        if (!lines.length) lines.push(...session.events(t).filter((l) => l.e === "mark"));
+        if (lines.length) return { t, lines, note: this.timelineView.note?.(area, t) };
       }
     }
     return undefined;
   }
 
   /** Hovering the timeline: a small tooltip, and the lines lit in the log when they're on screen */
-  showMarkHover(session: Session, hit: { t: number; lines: Line[] } | undefined, clientX: number, clientY: number): void {
+  showMarkHover(session: Session, hit: { t: number; lines: Line[]; note?: string } | undefined, clientX: number, clientY: number): void {
     const tip = $("timelineTip");
     for (const row of this.logRows.values()) row.classList.remove("tl-hover");
     if (!hit) {
@@ -418,7 +410,7 @@ export class Hud {
     tip.hidden = false;
     const shown = hit.lines.slice(0, 3).map((l) => describe(session, l));
     if (hit.lines.length > 3) shown.push(`and ${hit.lines.length - 3} more`);
-    tip.textContent = `tick ${hit.t}\n${shown.join("\n")}`;
+    tip.textContent = [`tick ${hit.t}`, ...(hit.note ? [hit.note] : []), ...shown].join("\n");
     const wrap = $("timelineWrap").getBoundingClientRect();
     tip.style.left = `${Math.min(wrap.width - 220, Math.max(0, clientX - wrap.left - 20))}px`;
     tip.style.bottom = `${wrap.bottom - clientY + 14}px`;
@@ -511,6 +503,34 @@ export class Hud {
     this.onTabPicked();
   }
 
+  /** Shows another view on the timeline, keeping its stretch, markers and notes */
+  setView(session: Session | undefined, id: string): void {
+    this.timelineView = VIEWS.find((v) => v.id === id) ?? VIEWS[0];
+    if (session) this.drawTimeline(session);
+    else this.showLegend();
+  }
+
+  get viewId(): string {
+    return this.timelineView.id;
+  }
+
+  /** The canvas and the stretch it shows, for the view to draw on */
+  private area(session: Session): TimelineArea {
+    const canvas = $<HTMLCanvasElement>("timeline");
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.width;
+    const [from, to] = this.range(session);
+    const span = Math.max(1, to - from);
+    return {
+      session, from, to, W, H: canvas.height, dpr,
+      x: (t) => 4 * dpr + ((W - 8 * dpr) * (t - from)) / span,
+      // Zoomed in, each tick's marks widen to fill its share of the timeline
+      tickW: Math.max(dpr, ((W - 8 * dpr) / span) * 0.8),
+      followKey: this.followKey,
+      outcomesByTick: this.outcomesByTick,
+    };
+  }
+
   drawTimeline(session: Session): void {
     const canvas = $<HTMLCanvasElement>("timeline");
     const dpr = window.devicePixelRatio || 1;
@@ -518,41 +538,40 @@ export class Hud {
     canvas.width = Math.max(1, Math.round(r.width * dpr));
     canvas.height = Math.max(1, Math.round(r.height * dpr));
     const ctx = canvas.getContext("2d")!;
-    const W = canvas.width;
-    const H = canvas.height;
-    const [from, to] = this.range(session);
-    const span = Math.max(1, to - from);
+    const a = this.area(session);
+    const { from, to, x, tickW, W, H } = a;
     ctx.fillStyle = "#22201d";
     ctx.fillRect(0, 0, W, H);
-    const x = (t: number) => 4 * dpr + ((W - 8 * dpr) * (t - from)) / span;
-    // Zoomed in, each tick's marks widen to fill its share of the timeline
-    const tickW = Math.max(dpr, ((W - 8 * dpr) / span) * 0.8);
-    if (span <= 200) {
+    if (to - from <= 200) {
       // Close enough to count ticks: a faint line on each one
       ctx.fillStyle = "#2c2a26";
       for (let t = from; t <= to; t++) ctx.fillRect(x(t), 0, 1, H);
     }
+    this.timelineView.draw(ctx, a);
+    // Markers and notes, the same in every view: a thin line, so the marks under them stay readable
+    ctx.fillStyle = MARK_COLOR;
     session.byTick.forEach((events, t) => {
-      if (t < from || t > to) return;
-      let anim = false;
-      let hit = false;
-      let mark = false;
-      for (const l of events) {
-        if (l.e === "anim" && l.who?.k === "npc" && l.a !== -1) anim = true;
-        if (l.e === "hit" && l.who && refKey(l.who) === this.followKey) hit = true;
-        if (l.e === "mark") mark = true;
-      }
-      if (anim) { ctx.fillStyle = ANIM_COLOR; ctx.fillRect(x(t), H * 0.62, tickW, H * 0.3); }
-      if (hit) { ctx.fillStyle = "#f0604f"; ctx.fillRect(x(t), H * 0.3, Math.max(1.5 * dpr, tickW), H * 0.3); }
-      // Markers and notes: a thin line, so the tick's other marks stay readable when ticks are wide
-      if (mark) { ctx.fillStyle = "#b08cf0"; ctx.fillRect(x(t) + tickW / 2 - 1.5 * dpr, 0, 3 * dpr, H); }
-      // Clicks the server took late or never acted on, along the top edge
-      for (const o of this.outcomesByTick.get(t) ?? []) {
-        const color = o.status === "late" ? "#f1c40f" : o.status === "delayed" ? "#6fa0ea" : o.status === "ignored" || o.status === "cancelled" ? "#ffffff" : null;
-        if (color) { ctx.fillStyle = color; ctx.fillRect(x(t), 0, Math.max(1.5 * dpr, tickW), H * 0.22); }
-      }
+      if (t >= from && t <= to && events.some((l) => l.e === "mark")) ctx.fillRect(x(t) + tickW / 2 - 1.5 * dpr, 0, 3 * dpr, H);
     });
     this.timelineBase = ctx.getImageData(0, 0, W, H);
+    this.showLegend();
+  }
+
+  /** The legend for the view shown, with markers, which every view has */
+  private showLegend(): void {
+    const legend = $("legend");
+    legend.title = this.timelineView.help;
+    legend.replaceChildren();
+    for (const item of [...this.timelineView.legend(this.followKey), { label: "marker", color: MARK_COLOR, help: "Your markers and notes, in every view" }]) {
+      const s = document.createElement("span");
+      s.title = item.help;
+      const swatch = document.createElement("i");
+      swatch.style.background = item.color;
+      if ("top" in item && item.top) swatch.className = "top";
+      if ("line" in item && item.line) swatch.className = "line";
+      s.append(swatch, item.label);
+      legend.append(s);
+    }
   }
 
   drawCursor(session: Session, position: number): void {
@@ -569,12 +588,6 @@ export class Hud {
     ctx.fillRect(x - dpr, 0, 2 * dpr, canvas.height);
   }
 }
-
-// NPC animations on the timeline: teal, well clear of the yellow "late" marks
-const ANIM_COLOR = "#3cc0a8";
-
-/** A row of marks on the timeline, from the top: click outcomes, hits, NPC animations; markers span all */
-type MarkRow = "click" | "hit" | "anim" | "mark";
 
 const BADGE: Record<OutcomeStatus, string> = {
   "on-time": "✓", late: "late", delayed: "held", already: "=", ignored: "✗", superseded: "↺", cancelled: "⊘", unknown: "·",

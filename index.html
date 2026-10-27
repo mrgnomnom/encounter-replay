@@ -67,14 +67,8 @@
       <button id="exportOpen" title="Download what the timeline shows, notes included, as a file to share. Drag across the timeline first to export just a stretch">Export…</button>
       <label title="Untick to see everything that happened, while still following"><input type="checkbox" id="logFilter" checked> only lines about <span id="filterWho">you</span></label>
       <label><input type="checkbox" id="showVars"> varbits in log</label>
-      <span class="legend" title="What the marks on the timeline mean">
-        <span title="Hits on whoever you follow"><i style="background:#f0604f"></i>hit</span>
-        <span title="NPC animations"><i style="background:#3cc0a8"></i>NPC anim</span>
-        <span title="Your markers"><i style="background:#b08cf0"></i>marker</span>
-        <span title="Along the top: clicks that missed the server's cut-off and landed a tick late"><i class="top" style="background:#f1c40f"></i>late</span>
-        <span title="Along the top: clicks the game held for several ticks"><i class="top" style="background:#6fa0ea"></i>held</span>
-        <span title="Along the top: clicks the server never acted on"><i class="top" style="background:#ffffff"></i>ignored</span>
-      </span>
+      <span class="legend" id="legend"></span>
+      <select id="timelineView" title="What the timeline shows. Markers, notes and the stretch you picked stay the same in every view"></select>
     </div>
     <div class="timeline-wrap" id="timelineWrap">
       <canvas id="timeline" title="Click to jump, drag to zoom into a stretch, drag the playhead to scrub"></canvas>
@@ -82,6 +76,7 @@
       <span id="zoomLabel" class="zoom-label" hidden></span>
       <div id="timelineTip" class="timeline-tip" hidden></div>
       <button id="zoomReset" class="zoom-reset" title="Show the whole recording (Esc)" hidden>×</button>
+      <div class="timeline-grip" id="timelineGrip" title="Drag to make the timeline taller or shorter; double-click to switch between tall and short"></div>
     </div>
     <div id="log"></div>
   </footer>

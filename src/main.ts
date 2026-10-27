@@ -23,6 +23,7 @@ import { Tour, tutorialDone } from "./tutorial";
 import { Notes } from "./notes";
 import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
+import { VIEWS } from "./timelineViews";
 import { toThree, World } from "./world";
 
 // One game tick is 600 ms
@@ -538,6 +539,22 @@ timeline.addEventListener("pointerup", (e) => {
 timeline.addEventListener("pointerleave", () => session && hud.showMarkHover(session, undefined, 0, 0));
 $("zoomReset").onclick = () => session && hud.setZoom(session, null);
 
+// What the timeline shows, kept between visits; ?view=damage picks one, e.g. for screenshots
+const viewPicker = $<HTMLSelectElement>("timelineView");
+for (const v of VIEWS) viewPicker.append(new Option(v.name, v.id));
+viewPicker.value = VIEWS.find((v) => v.id === (params.get("view") ?? recallText("replay.timelineView")))?.id ?? VIEWS[0].id;
+hud.setView(session, viewPicker.value);
+viewPicker.onchange = () => {
+  hud.setView(session, viewPicker.value);
+  rememberText("replay.timelineView", viewPicker.value);
+};
+function rememberText(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* storage blocked: the choice just won't be kept */ }
+}
+function recallText(key: string): string | undefined {
+  try { return localStorage.getItem(key) ?? undefined; } catch { return undefined; }
+}
+
 let sessionsFolder: string | undefined;
 
 /**
@@ -604,6 +621,11 @@ const tour = new Tour({
   },
   lateMark(t) {
     if (!session) return undefined;
+    // Late clicks are drawn in the tick events view
+    if (hud.viewId !== "events") {
+      viewPicker.value = "events";
+      hud.setView(session, "events");
+    }
     const r = timeline.getBoundingClientRect();
     const x0 = hud.xOfTick(session, t);
     const x1 = hud.xOfTick(session, t + 1);
@@ -768,6 +790,30 @@ dragEdge($("footResizer"), (e) => {
   if (session) hud.drawTimeline(session);
   return h;
 }, "replay.footHeight");
+
+/**
+ * The timeline's height: short by default, taller for views with more to show. The bottom panel grows
+ * with it when it has to, so the log keeps a few lines
+ */
+const TIMELINE_SHORT = 34;
+const TIMELINE_TALL = 140;
+const TIMELINE_MAX = 360;
+// The bottom panel's room besides the timeline: the controls above it and a few lines of log below
+const FOOT_BESIDES_TIMELINE = 130;
+function setTimelineHeight(px: number): number {
+  const h = Math.round(Math.max(TIMELINE_SHORT, Math.min(TIMELINE_MAX, px)));
+  root.style.setProperty("--timeline-h", `${h}px`);
+  const foot = $("timelineWrap").closest("footer")!.getBoundingClientRect().height;
+  if (foot < h + FOOT_BESIDES_TIMELINE) setFoot(h + FOOT_BESIDES_TIMELINE);
+  if (session) hud.drawTimeline(session);
+  return h;
+}
+setTimelineHeight(Number(sizes.get("timeline")) || recall("replay.timelineHeight") || TIMELINE_SHORT);
+dragEdge($("timelineGrip"), (e) => setTimelineHeight(e.clientY - timeline.getBoundingClientRect().top), "replay.timelineHeight");
+$("timelineGrip").ondblclick = () => {
+  const now = timeline.getBoundingClientRect().height;
+  remember("replay.timelineHeight", setTimelineHeight(now > TIMELINE_SHORT + 10 ? TIMELINE_SHORT : TIMELINE_TALL));
+};
 // ?demo opens the demo recording; ?t=12.5 jumps to a moment in it, e.g. for screenshots; ?focus=n123
 // follows that actor instead of you and ?zoom=8 sets how far away the camera starts
 pendingFocus = params.get("focus") ?? undefined;
