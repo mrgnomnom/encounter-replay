@@ -2,7 +2,7 @@ import {
   FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickFolder, reconnect, rememberedFolders,
   type FolderKind, type Folders,
 } from "./runeliteFolder";
-import { kofiButton } from "./support";
+import { githubLink, kofiButton } from "./support";
 
 /**
  * Setting up the folders the page reads. First a landing page, with nothing else on screen, that walks
@@ -110,7 +110,7 @@ export class FolderUi {
     }
     // At the bottom of the screen, out of the way of the setup
     const support = el("div", "", "landing-support");
-    support.append(el("span", "Enjoying it?", "muted"), kofiButton());
+    support.append(el("span", "Enjoying it?", "muted"), kofiButton(), githubLink("button"));
     this.landing.replaceChildren(card, support);
   }
 

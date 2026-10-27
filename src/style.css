@@ -17,10 +17,13 @@ button, select {
 }
 header {
   display: flex; align-items: center; gap: 12px; padding: 8px 16px;
-  border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
 }
+header > * { flex: none; }
 header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-header .meta { color: var(--muted); font-size: 12px; }
+/* The recording's details give way first, so the header stays on one row */
+header .meta { color: var(--muted); font-size: 12px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) { header { flex-wrap: wrap; } }
 header #recordings { margin-left: auto; max-width: 280px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
 header label.file { border: 1px solid var(--line); background: var(--panel); padding: 3px 10px; border-radius: 6px; cursor: pointer; }
 header input[type=file] { display: none; }
@@ -316,6 +319,22 @@ button.link:hover { color: var(--ink); }
 .kofi-card .kofi-button { font-size: 13px; }
 .kofi-close { position: absolute; top: 6px; right: 6px; border: none; background: none; color: var(--muted); font-size: 16px; padding: 0 6px; }
 .kofi-close:hover { color: var(--ink); }
+
+/* The source on GitHub: beside the Ko-fi button on the landing page, beside Donate in the header */
+.github-mark { width: 16px; height: 16px; flex: none; }
+.github-button {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px 8px 12px; border-radius: 999px;
+  background: #24292f; color: #fff; font-weight: 600; font-size: 14px; text-decoration: none; border: 1px solid #3d444d;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); transition: background 0.15s, transform 0.15s;
+}
+.github-button:hover { background: #32383f; transform: translateY(-1px); }
+#landing a.github-button { color: #fff; }
+.github-quiet {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; margin-left: 4px;
+  color: var(--muted); font-size: 12px; text-decoration: none;
+}
+.github-quiet:hover { color: var(--ink); }
+.github-quiet .github-mark { width: 14px; height: 14px; }
 
 /* The tutorial: one part of the page lit, the rest dimmed, and a small card beside it */
 .tour-spot {
