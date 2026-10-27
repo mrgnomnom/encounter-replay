@@ -58,9 +58,38 @@ function recordings(): Plugin {
   };
 }
 
+/**
+ * Development only: the exporter's copy of the game cache at /dev-cache/<file>?o=<offset>&n=<length>, so
+ * a headless browser, which can't be given a folder, can test building bundles in the page (?devCache)
+ */
+function devCache(): Plugin {
+  return {
+    name: "encounter-dev-cache",
+    configureServer(server) {
+      server.middlewares.use("/dev-cache", (req, res) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const name = url.pathname.slice(1);
+        const file = join(__dirname, "exporter", "build", "cache-live", name);
+        if (!/^main_file_cache\.(dat2|idx\d+)$/.test(name) || !existsSync(file)) {
+          res.statusCode = 404;
+          res.end("Not found");
+          return;
+        }
+        const o = Number(url.searchParams.get("o") ?? 0);
+        const n = url.searchParams.get("n");
+        const end = n == null ? undefined : o + Number(n) - 1;
+        res.setHeader("Content-Type", "application/octet-stream");
+        createReadStream(file, { start: o, end }).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
-  plugins: [recordings(), exportServer(sessionsFolder, homedir())],
+  plugins: [recordings(), devCache(), exportServer(sessionsFolder, homedir())],
+  // The bundle builder runs in a module worker
+  worker: { format: "es" },
   server: {
     port: 5180,
     host: "127.0.0.1",

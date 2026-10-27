@@ -9,9 +9,11 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "audit": "vite-node scripts/audit.ts"
+    "audit": "vite-node scripts/audit.ts",
+    "parity": "vite-node scripts/parity.ts"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "gl-matrix": "^3.4.3",
     "three": "^0.170.0"
   },

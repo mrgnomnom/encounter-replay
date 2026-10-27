@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import "./style.css";
 import { Bundle } from "./cache/bundle";
+import type { BuildMessage, BuildRequest } from "./cache/build/worker";
 import { Hud } from "./hud";
 import { cycleAt } from "./moment";
 import { clickPoints, hasAccuracyData } from "./accuracy";
@@ -17,6 +18,7 @@ import { ObjectTimeline } from "./objects";
 import { Session } from "./session";
 import { Stage } from "./stage";
 import { syntheticSession } from "./synthetic";
+import { folderPickerSupported, listSessions, pickRuneliteFolder, readSession, reconnect, rememberedFolder, type RuneliteFolder } from "./runeliteFolder";
 import { toThree, World } from "./world";
 
 // One game tick is 600 ms
@@ -51,9 +53,42 @@ camera.position.set(52, 14, -40);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.47;
-controls.minDistance = 3;
-controls.maxDistance = 70;
+// Panning slides the point the camera orbits along the floor. Panning in screen space would lift it into
+// the air or sink it underground, so the camera would zoom towards a point it isn't looking at
+controls.screenSpacePanning = false;
+controls.enableZoom = false;
 controls.target.set(52, 0, -52);
+
+// Zoom without limits. The wheel scales the distance to the orbit point. Closer in than MIN_ORBIT the
+// camera walks forward instead and carries the point with it, so zooming never stalls against it
+const MIN_ORBIT = 1.5;
+renderer.domElement.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const pixels = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  const factor = Math.exp(pixels * 0.0015);
+  const offset = camera.position.clone().sub(controls.target);
+  const d = offset.length();
+  if (d * factor >= MIN_ORBIT) {
+    camera.position.copy(controls.target).addScaledVector(offset, factor);
+  } else {
+    const forward = offset.normalize().negate();
+    controls.target.addScaledVector(forward, Math.max(d, 4) * (1 - factor));
+    camera.position.copy(controls.target).addScaledVector(forward, -MIN_ORBIT);
+  }
+}, { passive: false });
+
+/** Keeps the fog and the far plane beyond the orbit point, however far out the camera is */
+function fitViewDistance(): void {
+  const d = camera.position.distanceTo(controls.target);
+  const fog = scene.fog as THREE.Fog;
+  fog.near = Math.max(40, d + 25);
+  fog.far = Math.max(90, d + 75);
+  const far = Math.max(400, d * 4);
+  if (camera.far !== far) {
+    camera.far = far;
+    camera.updateProjectionMatrix();
+  }
+}
 
 const world = new World();
 const stage = new Stage();
@@ -72,8 +107,12 @@ const lastFocus = new THREE.Vector3();
 let cameraDistance = 17;
 let hasFocus = false;
 
+let sessionText = "";
+let sessionBase = "";
+
 function open(text: string, name: string): void {
   session = Session.parse(text);
+  sessionText = text;
   objects = new ObjectTimeline(session);
   hud.setOutcomes(clickOutcomes(session));
   hud.setAccuracy(hasAccuracyData(session) ? clickPoints(session) : undefined);
@@ -85,7 +124,66 @@ function open(text: string, name: string): void {
   objectLayer.load(undefined);
   // Models come from a cache bundle exported for this session, if there is one next to the page
   const base = name.replace(/\.jsonl$/, "");
+  sessionBase = base;
   const opened = session;
+  // With the RuneLite folder connected, models come straight from the game cache in it
+  if (folder) void buildFromCache(folder.cache);
+  // ?devCache builds from the dev server's copy of the cache, for testing in a headless browser
+  else if (params.has("devCache")) void buildFromCache(new URL("dev-cache/", location.href).href);
+  else devBundle(name, base, opened);
+  hasFocus = false;
+  Object.assign(clock, { t: 0, frac: 0, playing: false });
+  $("drop").classList.add("hidden");
+  hud.showMeta(session, name);
+  hud.drawTimeline(session);
+  seek(0);
+  updatePlay();
+}
+
+/** Builds the open session's bundle from the game cache, in a worker so the replay keeps running */
+async function buildFromCache(cache: BuildRequest["cache"]): Promise<void> {
+  const opened = session;
+  const base = sessionBase;
+  const started = performance.now();
+  $("bundleStatus").textContent = "reading the game cache…";
+  try {
+    // ?devCache=inline builds on the page instead, where a headless screenshot waits for it to finish
+    const raw = typeof cache === "string" && params.get("devCache") === "inline" ? await buildInline(cache) : await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const worker = new Worker(new URL("./cache/build/worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (e: MessageEvent<BuildMessage>) => {
+        const m = e.data;
+        if ("progress" in m) {
+          if (session === opened) $("bundleStatus").textContent = `reading the game cache: ${m.progress}…`;
+          return;
+        }
+        worker.terminate();
+        if ("bundle" in m) resolve(m.bundle);
+        else reject(new Error(m.error));
+      };
+      worker.onerror = (e) => {
+        worker.terminate();
+        reject(new Error(e.message));
+      };
+      worker.postMessage({ cache, session: sessionText } satisfies BuildRequest);
+    });
+    if (session !== opened) return;
+    useBundle(new Bundle(raw as never), base);
+    console.info(`Bundle built from the game cache in ${((performance.now() - started) / 1000).toFixed(1)}s`);
+  } catch (e) {
+    if (session !== opened) return;
+    $("bundleStatus").textContent = `couldn't read the game cache: ${e instanceof Error ? e.message : e}`;
+  }
+}
+
+async function buildInline(url: string): Promise<Record<string, unknown>> {
+  const [{ buildBundle }, { CacheStore }, { devSource }] = await Promise.all([
+    import("./cache/build/buildBundle"), import("./cache/store/store"), import("./cache/build/devSource"),
+  ]);
+  return buildBundle(await CacheStore.open(devSource(url)), sessionText, (step) => ($("bundleStatus").textContent = `reading the game cache: ${step}…`));
+}
+
+/** In development: a bundle the Java exporter wrote next to the page, exported on demand */
+function devBundle(name: string, base: string, opened: Session): void {
   $("bundleStatus").textContent = "looking for models…";
   Bundle.fetch(`assets/cache/${base}.bundle.json`).then(async (b) => {
     if (session !== opened) return;
@@ -103,13 +201,6 @@ function open(text: string, name: string): void {
     useBundle(b, base);
     if (failure) $("bundleStatus").textContent = `export failed: ${failure.split("\n")[0]}`;
   });
-  hasFocus = false;
-  Object.assign(clock, { t: 0, frac: 0, playing: false });
-  $("drop").classList.add("hidden");
-  hud.showMeta(session, name);
-  hud.drawTimeline(session);
-  seek(0);
-  updatePlay();
 }
 
 function useBundle(b: Bundle | undefined, base: string): void {
@@ -277,6 +368,7 @@ function frame(now: number): void {
     updateFilterLabel();
   }
   controls.update();
+  fitViewDistance();
   renderer.render(scene, camera);
   labels.render(scene, camera);
   drawHitLine();
@@ -440,9 +532,58 @@ async function openWithPicker(): Promise<void> {
   }
 }
 
-// The recorder's own sessions folder, listed by the dev server: newest first, refreshed on open
+// The RuneLite folder, once connected: recordings and the game cache are read from it
+let folder: RuneliteFolder | undefined;
+let folderToReconnect: FileSystemDirectoryHandle | undefined;
+
+function showFolderButton(): void {
+  const button = $("connectFolder");
+  button.hidden = !folderPickerSupported() || !!folder;
+  button.textContent = folderToReconnect ? "Reconnect RuneLite folder" : "Connect RuneLite folder";
+}
+
+$("connectFolder").onclick = async () => {
+  try {
+    folder = folderToReconnect ? await reconnect(folderToReconnect) : await pickRuneliteFolder();
+  } catch (e) {
+    // Cancelling the picker isn't worth a message
+    if (!(e instanceof DOMException && e.name === "AbortError")) $("drop").textContent = e instanceof Error ? e.message : String(e);
+  }
+  if (!folder) return;
+  folderToReconnect = undefined;
+  showFolderButton();
+  await listRecordings();
+  if (!openFromHash() && session && !bundle) void buildFromCache(folder.cache);
+};
+
+/** #session=<file> opens a recording from the connected folder: the recorder's Replay button links here */
+function openFromHash(): boolean {
+  const name = new URLSearchParams(location.hash.slice(1)).get("session");
+  if (!name || !/^[\w.-]+\.jsonl$/.test(name)) return false;
+  if (!folder) {
+    $("drop").innerHTML = "";
+    $("drop").append(`Connect your RuneLite folder to open ${name}`);
+    return false;
+  }
+  history.replaceState(null, "", location.pathname + location.search);
+  readSession(folder, name).then((text) => open(text, name), () => ($("drop").textContent = `${name} isn't in your recordings folder`));
+  return true;
+}
+window.addEventListener("hashchange", () => void openFromHash());
+
+// The recorder's own sessions folder: from the connected RuneLite folder, or else listed by the dev
+// server. Newest first, refreshed on open
 async function listRecordings(): Promise<void> {
   const select = $<HTMLSelectElement>("recordings");
+  if (folder) {
+    const files = await listSessions(folder).catch(() => []);
+    select.title = "Recordings in your RuneLite folder, newest first";
+    const keep = select.value;
+    select.replaceChildren(new Option(files.length ? "Recordings…" : "No recordings yet", ""), ...files.map((f) =>
+      new Option(`${f.name.replace(/\.jsonl$/, "")} · ${(f.size / 1048576).toFixed(1)} MB`, f.name)));
+    select.value = keep;
+    return;
+  }
   try {
     const r = await fetch("recordings/");
     if (!r.ok) throw new Error(await r.text());
@@ -462,10 +603,16 @@ $<HTMLSelectElement>("recordings").onfocus = () => void listRecordings();
 $<HTMLSelectElement>("recordings").onchange = async (e) => {
   const name = (e.target as HTMLSelectElement).value;
   if (!name) return;
-  const text = await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
+  const text = folder ? await readSession(folder, name) : await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
   open(text, name);
 };
-void listRecordings();
+void rememberedFolder().then(({ folder: remembered, needsPermission }) => {
+  folder = remembered;
+  folderToReconnect = needsPermission;
+  showFolderButton();
+  void listRecordings();
+  openFromHash();
+});
 
 // Files: the session is read in the page and never leaves it
 

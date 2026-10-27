@@ -23,7 +23,7 @@ function liveCache(home: string): string | undefined {
 }
 
 /** A Java 11+ runtime: ENCOUNTER_JAVA, then JDKs IntelliJ keeps in ~/.jdks */
-function java(): string | undefined {
+export function java(): string | undefined {
   if (process.env.ENCOUNTER_JAVA) return process.env.ENCOUNTER_JAVA;
   const homes = [process.env.USERPROFILE, ...(existsSync("/mnt/c/Users") ? readdirSync("/mnt/c/Users").map((u) => join("/mnt/c/Users", u)) : [])];
   for (const home of homes) {
@@ -40,7 +40,7 @@ function java(): string | undefined {
 }
 
 /** Paths as the (Windows) Java runtime needs them when run from WSL */
-function forJava(path: string, javaPath: string): string {
+export function forJava(path: string, javaPath: string): string {
   const m = /^\/mnt\/([a-z])\/(.*)$/.exec(path);
   return javaPath.endsWith(".exe") && m ? `${m[1].toUpperCase()}:\\${m[2].split("/").join("\\")}` : path;
 }
