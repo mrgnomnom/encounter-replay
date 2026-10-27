@@ -49,6 +49,12 @@ export interface Outcome {
 const WINDOW_TICKS = 5;
 const PRAYER_INTERFACE = 541;
 const INVENTORY_INTERFACE = 149;
+/**
+ * A click only misses the cut-off when it reaches the server after the tick has started: in the last
+ * few cycles of its window, the round trip eating the rest. One that came a tick late from earlier in
+ * the window was held by the game instead (a second drink in the same tick waits out the drink delay)
+ */
+const LATE_MARGIN_CYCLES = 10;
 
 export function clickOutcomes(session: Session): Outcome[] {
   const worn: Line[] = [];
@@ -75,6 +81,7 @@ export function clickOutcomes(session: Session): Outcome[] {
     const o = follow(session, click, worn, inv, targets);
     const end = session.ticks[click.t]?.c;
     if (end != null) o.margin = end - click.c;
+    if (o.status === "late" && o.margin != null && o.margin > LATE_MARGIN_CYCLES) o.status = "delayed";
     out.push(o);
   }
   return out;

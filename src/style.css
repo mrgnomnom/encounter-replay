@@ -134,6 +134,14 @@ body.no-object-labels .objtag { display: none; }
 .game-ui .combat-spec { position: absolute; left: 21px; top: 212px; width: 148px; height: 22px; background: #2a1e10; border: 1px solid #000; }
 .game-ui .combat-spec .fill { height: 100%; background: linear-gradient(#3fa02c, #1f6f1a); }
 .game-ui .combat-spec .text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #000; text-shadow: none; }
+/* Following someone else: the panel is still yours */
+.game-ui.not-followed { position: relative; }
+.game-ui .not-followed-veil { position: absolute; left: 0; right: 0; top: 0; height: 376px; z-index: 20; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.45) 0 10px, rgba(0, 0, 0, 0.3) 10px 20px);
+  display: flex; align-items: center; justify-content: center; font-size: 64px; color: #ffcf3d; text-shadow: 0 2px 8px #000; }
+.game-ui .not-followed-note { margin-top: 8px; padding: 8px 10px; border: 2px solid #ffcf3d; border-radius: 6px; background: #2a2210;
+  color: #ffcf3d; font: 700 15px/1.25 system-ui, sans-serif; text-align: center; }
+.game-ui .not-followed-note .sub { margin-top: 3px; font-weight: 400; font-size: 11px; color: #d9c48a; }
 .follow-tab { color: var(--muted); font-size: 11px; }
 aside {
   border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; overflow-x: hidden;

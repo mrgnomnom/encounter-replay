@@ -5,7 +5,7 @@ import { targetsOf, type Target } from "./highlight";
 import { isOthersHit, isYourHit, landedProjectile } from "./hits";
 import type { EffectLinks } from "./links";
 import { pendingAt, type Outcome, type OutcomeStatus } from "./outcomes";
-import { effectsOfActor, relatesTo } from "./relevance";
+import { effectsOfActor, refOfKey, relatesTo } from "./relevance";
 import { refKey, stoppedTargeting, type Line, type Session } from "./session";
 
 /**
@@ -219,7 +219,7 @@ export class Hud {
       if (o) d.appendChild(span(`badge ${o.status}`, BADGE[o.status]));
       d.appendChild(document.createTextNode(`${c.option} ${c.target || ""}`.trim()));
       // When in the tick it happened, and when the server's change arrived
-      const into = o?.margin != null ? ` · ${o.margin} cycles before the tick's update` : tickStart != null ? ` · ${c.c - tickStart} cycles into the tick` : "";
+      const into = o?.margin != null ? ` · clicked ${o.margin * 20} ms before the tick ended` : tickStart != null ? ` · ${(c.c - tickStart) * 20} ms into the tick` : "";
       const result = o?.appliedTick != null ? ` · applied tick ${o.appliedTick}${o.serverTicks && o.serverTicks > 1 ? ` (${o.serverTicks} server ticks)` : ""}` : "";
       d.appendChild(span("w", `${into}${result}`));
       d.title = o ? OUTCOME_HELP[o.status] : "";
@@ -412,6 +412,8 @@ export class Hud {
     // Hovering something in another tab shows that tab while the hover lasts
     const tab = slot ? slot.tab : this.viewTab;
     this.gameUi.render(session, t, this.bundle, tab, gameTab, pendingAt(this.outcomes, t), thisTick, slot ?? undefined);
+    const followed = this.followKey === "me" ? undefined : refOfKey(this.followKey, session, t);
+    this.gameUi.warnNotFollowed(this.followKey === "me" ? undefined : followed ? session.label(followed, t) : "them");
   }
 
   private hoverable(row: HTMLElement, line: Line): void {
@@ -538,8 +540,8 @@ const BADGE: Record<OutcomeStatus, string> = {
 
 const OUTCOME_HELP: Record<OutcomeStatus, string> = {
   "on-time": "The server acted on this at its next tick",
-  late: "This missed the server's cut-off for its tick and landed at the next one",
-  delayed: "The game held this for several ticks (a potion or food delay, walking into range)",
+  late: "Clicked in the last moments of its tick: it reached the server after the tick had started, so it landed a tick later",
+  delayed: "The game held this past the next tick (a potion or food delay, walking into range)",
   already: "Nothing to change: it was already that way",
   ignored: "The server never made this change",
   superseded: "A later click in the same tick undid this before the server got to it",

@@ -132,6 +132,19 @@ export class GameUi {
   }
 
   /**
+   * While following someone else: the panel still shows your own inventory, prayers and stats (the game
+   * only sends those for you), so it's dimmed with a warning over it and a note below
+   */
+  warnNotFollowed(name: string | undefined): void {
+    this.root.classList.toggle("not-followed", !!name);
+    if (!name) return;
+    el("div", "not-followed-veil", this.root).textContent = "⚠";
+    const note = el("div", "not-followed-note", this.root);
+    note.textContent = "Only showing main player statuses";
+    el("div", "sub", note).textContent = `Inventory, prayers and stats aren't recorded for ${name}`;
+  }
+
+  /**
    * Draws the panel at tick t. Pending clicks (made, not yet acted on by the server) get a dashed
    * outline; clicks this tick the server ignored get a cross
    */

@@ -19,13 +19,17 @@ const session = Session.parse(
     pray(4, 182, "Deactivate", "Smite"),
     tick(4, ["PROTECT_FROM_MAGIC", "PIETY"]),
     // Gear: wield at tick 5, equipment update arrives in tick 6
-    { t: 5, c: 205, e: "click", option: "Wield", target: "Twisted bow", action: "CC_OP", widget: [149, 0], p0: 3, item: 20997, id: 3 },
+    { t: 5, c: 245, e: "click", option: "Wield", target: "Twisted bow", action: "CC_OP", widget: [149, 0], p0: 3, item: 20997, id: 3 },
     tick(5, ["PROTECT_FROM_MAGIC", "PIETY"]),
     { t: 6, c: 215, e: "items", which: "worn", items: [[-1, 0], [-1, 0], [-1, 0], [20997, 1]] },
     tick(6, ["PROTECT_FROM_MAGIC", "PIETY"]),
+    // A second drink early in tick 7, held by the drink delay until tick 8
+    { t: 7, c: 225, e: "click", option: "Drink", target: "Saradomin brew(2)", action: "CC_OP", widget: [149, 0], p0: 0, item: 6689, id: 1 },
     // A click another plugin cancelled
     { t: 7, c: 230, e: "click", option: "Wear", target: "Fire cape", action: "CC_OP", item: 6570, consumed: true },
     tick(7, []),
+    { t: 8, c: 265, e: "items", which: "inv", items: [[6691, 1]] },
+    tick(8, []),
   ].map((l) => JSON.stringify(l)).join("\n"),
 );
 const outcomes = clickOutcomes(session);
@@ -38,6 +42,10 @@ describe("clickOutcomes", () => {
 
   it("calls a click that missed the cut-off late, with how many ticks it took", () => {
     expect(by("Piety")).toMatchObject({ status: "late", appliedTick: 3, serverTicks: 2 });
+  });
+
+  it("calls a click that came a tick late from early in its window held, not late", () => {
+    expect(by("Saradomin brew(2)")).toMatchObject({ status: "delayed", serverTicks: 2 });
   });
 
   it("measures how close to the end of its tick window each click was", () => {
