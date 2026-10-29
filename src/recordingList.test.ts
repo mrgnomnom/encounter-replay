@@ -19,7 +19,8 @@ describe("recording list", () => {
   });
 
   it("reads the length from the last whole line, even mid-write", () => {
-    expect(ticksFromTail('{"t":2597,"c":1,"e":"tick"}\n{"t":2598,"c":2,"e":"end"}\n')).toBe(2599);
+    // Stopped: the end line has the count
+    expect(ticksFromTail('{"t":2597,"c":1,"e":"tick"}\n{"t":2598,"c":2,"e":"end","ticks":2598}\n')).toBe(2598);
     expect(ticksFromTail('ut off line"}\n{"t":40,"c":1,"e":"tick"}\n{"t":41,"c":2,"e":"an')).toBe(41);
     expect(ticksFromTail("")).toBeUndefined();
   });

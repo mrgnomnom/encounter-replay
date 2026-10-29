@@ -41,15 +41,20 @@ export function sortRecordings<T extends RecordingFile>(files: T[]): T[] {
   return [...files].sort((a, b) => recordedAt(b) - recordedAt(a) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-/** How many ticks a recording spans, from the end of its file: its last whole line's tick, counted from 0 */
+/**
+ * How many ticks a recording spans, from the end of its file, as the plugin counts them: a stopped one
+ * ends with its count (its end line's own tick is that count, not one more); one still being written, or
+ * cut off, by its last whole line's tick, counted from 0
+ */
 export function ticksFromTail(tail: string): number | undefined {
   const lines = tail.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
     if (!line) continue;
     try {
-      const t = (JSON.parse(line) as { t?: unknown }).t;
-      if (typeof t === "number") return t + 1;
+      const last = JSON.parse(line) as { t?: unknown; e?: unknown; ticks?: unknown };
+      if (last.e === "end" && typeof last.ticks === "number") return last.ticks;
+      if (typeof last.t === "number") return last.t + 1;
     } catch {
       // Cut off at the start of the tail, or still being written: try the line before
     }
