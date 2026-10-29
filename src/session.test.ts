@@ -156,3 +156,27 @@ describe("walk click tiles", () => {
     expect(walks[1].tile).toMatchObject({ x: 3295, y: 9866 });
   });
 });
+
+describe("guessed health", () => {
+  const p = (hp?: [number, number]) => ({ who: { k: "player", i: 7 }, x: 0, y: 0, p: 0, o: 0, a: -1, af: -1, pose: 808, ...(hp ? { hp } : {}) });
+  const tick = (t: number, hp?: [number, number]) => ({ t, c: t * 30, e: "tick", me: { who: { k: "me" }, x: 0, y: 0, p: 0, o: 0, a: -1, af: -1 }, npcs: [], players: [p(hp)] });
+  const s = Session.parse([
+    { t: 0, c: 0, e: "header", format: 6 },
+    tick(1), tick(2, [20, 30]), tick(3), tick(4),
+    // Dying: the bar stays up at empty through the death animation
+    { t: 5, c: 140, e: "death", who: { k: "player", i: 7 } },
+    tick(5, [0, 30]), tick(6, [0, 30]), tick(7),
+  ].map((l) => JSON.stringify(l)).join("\n"));
+
+  it("is full before the game has shown the bar", () => {
+    expect(s.guessedHp("p7", 1)).toEqual([1, 1]);
+  });
+
+  it("holds the last bar shown until the next", () => {
+    expect(s.guessedHp("p7", 4)).toEqual([20, 30]);
+  });
+
+  it("is full again once a death's empty bar is gone", () => {
+    expect(s.guessedHp("p7", 7)).toEqual([1, 1]);
+  });
+});

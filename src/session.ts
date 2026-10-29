@@ -132,6 +132,7 @@ export class Session {
   /** Lines naming each player index, in order: indexes get reused as players come and go */
   private readonly playerNames = new Map<number, Line[]>();
   private ownName: string | undefined;
+  private healthReadings?: Map<string, Line[]>;
 
   private constructor(lines: Line[], unreadable: number) {
     this.lines = lines;
@@ -238,6 +239,29 @@ export class Session {
 
   get lastTick(): number {
     return this.byTick.length - 1;
+  }
+
+  /**
+   * A best guess at another player's health while the game isn't showing their bar: the last reading it
+   * showed. Health only falls through hits, and every hit shows the bar again, so between readings it
+   * stays the same or rises (food, regeneration): this never overstates it. Full before the first
+   * reading, and after an empty one: they died, and respawn
+   */
+  guessedHp(key: string, t: number): [number, number] {
+    if (!this.healthReadings) {
+      this.healthReadings = new Map();
+      for (const tick of this.ticks) {
+        for (const p of tick?.players ?? []) {
+          if (!p.hp) continue;
+          const k = refKey(p.who);
+          const readings = this.healthReadings.get(k) ?? [];
+          readings.push({ t: tick!.t, c: tick!.c, e: "hp", hp: p.hp } as Line);
+          this.healthReadings.set(k, readings);
+        }
+      }
+    }
+    const last = latestAtOrBefore(this.healthReadings.get(key) ?? [], t);
+    return !last || last.hp[0] === 0 ? [1, 1] : last.hp;
   }
 
   /** The snapshot for tick t, or the latest before it if that tick has none */

@@ -126,7 +126,7 @@ class ActorView {
     this.model?.dispose();
   }
 
-  update(frame: ActorFrame, ground: number, world: World, info: { lines: string[]; icons: string[]; hits: Line[]; say?: string; flash: number; pulseHit?: Line; hpBar: boolean }): void {
+  update(frame: ActorFrame, ground: number, world: World, info: { lines: string[]; icons: string[]; hits: Line[]; say?: string; flash: number; pulseHit?: Line; hp?: [number, number]; hpGuessed: boolean }): void {
     toThree(frame.x, frame.y, ground, this.root.position);
     this.facing.rotation.y = (-frame.orientation * Math.PI * 2) / 2048;
     if (this.boxMaterial) {
@@ -160,14 +160,15 @@ class ActorView {
     this.say.textContent = info.say ?? "";
     this.say.style.display = info.say ? "" : "none";
     this.lines.textContent = info.lines.join("\n");
-    const hp = info.hpBar ? frame.state.hp : undefined;
+    const hp = info.hp;
     this.hpBar.style.display = hp ? "" : "none";
+    this.hpBar.classList.toggle("guess", !!hp && info.hpGuessed);
     if (hp) {
       // The game's own bar, as a share of its segments: a percentage, since the exact HP isn't sent
       const share = (100 * hp[0]) / Math.max(1, hp[1]);
       this.hpFill.style.width = `${share}%`;
       // Never 0% while it's alive: the game keeps a sliver of bar until the end
-      this.hpText.textContent = `${hp[0] > 0 ? Math.max(1, Math.round(share)) : 0}%`;
+      this.hpText.textContent = `${info.hpGuessed ? "~" : ""}${hp[0] > 0 ? Math.max(1, Math.round(share)) : 0}%`;
     }
     // Rebuilt only when the hitsplats change; the hovered one pulses in size every frame
     const splatKey = info.hits.map((h) => `${h.c}:${h.amount}:${h === info.pulseHit}`).join("|");
@@ -483,7 +484,9 @@ export class Stage {
         pulseHit: (this.targets.find((x) => x.kind === "hit") as { line: Line } | undefined)?.line,
         say: says.get(f.key),
         flash: age < FLASH_TICKS ? 1 - age / FLASH_TICKS : 0,
-        hpBar: this.hpBars && f.key !== "me",
+        // Another player's bar only while the game showed it: otherwise a best guess, marked as one
+        hp: !this.hpBars || f.key === "me" ? undefined : f.state.hp ?? (f.kind === "player" ? session.guessedHp(f.key, t) : undefined),
+        hpGuessed: !f.state.hp,
       });
     }
     for (const [key, view] of this.actors) {

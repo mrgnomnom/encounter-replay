@@ -66,6 +66,8 @@ body.resizing canvas, body.resizing iframe { pointer-events: none; }
 .tag .lines { font-size: 11px; white-space: pre; text-align: center; text-shadow: 0 1px 2px #000, 0 0 4px #000; }
 .tag .hp { position: relative; width: 40px; height: 11px; background: var(--hit); border: 1px solid #000; }
 .tag .hp .fill { height: 100%; background: #2ecc40; }
+/* A best guess while the game wasn't showing the bar: faded, and its number marked "~" */
+.tag .hp.guess { opacity: 0.5; }
 .tag .hp .pct { position: absolute; inset: 0; font: 600 9px/11px sans-serif; color: #fff; text-align: center; text-shadow: 0 0 2px #000, 0 1px 1px #000; }
 .tag .splats { display: flex; gap: 2px; }
 .tag .splat {
