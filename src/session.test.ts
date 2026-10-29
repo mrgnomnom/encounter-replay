@@ -141,3 +141,18 @@ describe("NPC names", () => {
     expect(session.npcName(2)).toBe("unnamed NPC 2");
   });
 });
+
+describe("walk click tiles", () => {
+  it("takes the tile the client walked to over the one under the mouse", () => {
+    const s = Session.parse([
+      { t: 0, c: 1, e: "header", format: 6 },
+      { t: 16, c: 149906, e: "click", option: "Walk here", action: "WALK", tile: { x: 3300, y: 9866, p: 0, pl: 0, sx: 60, sy: 50 } },
+      { t: 16, c: 149910, e: "dest", x: 3299, y: 9866, p: 0, pl: 0, sx: 59, sy: 50, click: 149906 },
+      { t: 18, c: 149966, e: "click", option: "Walk here", action: "WALK", tile: { x: 3295, y: 9866, p: 0, pl: 0, sx: 55, sy: 50 } },
+    ].map((l) => JSON.stringify(l)).join("\n"));
+    const walks = s.lines.filter((l) => l.e === "click");
+    expect(walks[0].tile).toMatchObject({ x: 3299, y: 9866, sx: 59 });
+    // No dest line for it (older recordings): the guess stays
+    expect(walks[1].tile).toMatchObject({ x: 3295, y: 9866 });
+  });
+});

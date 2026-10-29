@@ -1,5 +1,5 @@
 import {
-  FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickCacheFiles, pickSessionsFolder, reconnect, rememberedFolders,
+  FIRST_ASKED, FOLDER_PATHS, filesRead, folderPickerSupported, forgetFolders, onRead, pickCacheFiles, pickSessionsFolder, reconnect, rememberedFolders,
   type FolderKind, type Folders,
 } from "./runeliteFolder";
 import { githubLink, kofiButton } from "./support";
@@ -27,8 +27,13 @@ export class FolderUi {
   private needPermission: Folders = {};
   /** The cache was connected as a whole folder before: that access was dropped, for its files instead */
   private upgraded = false;
-  /** The browser didn't give back access to every cache file in one go: they're to be chosen again */
-  private reask = false;
+  /**
+   * The browser didn't give back access to every cache file in one go: they're to be chosen again, in a
+   * dialog that opens where they were
+   */
+  private reask?: FileSystemFileHandle[];
+  /** The recordings folder the browser wouldn't allow again: it's to be chosen again, in a dialog that opens in it */
+  private sessionsFrom?: FileSystemDirectoryHandle;
   private readonly landing = document.getElementById("landing") as HTMLElement;
   private readonly dialog = document.getElementById("folderDialog") as HTMLDialogElement;
   private readonly privacy = document.getElementById("privacyDialog") as HTMLDialogElement;
@@ -90,20 +95,46 @@ export class FolderUi {
       const allow = el("button", "Allow access to the game cache", "primary big");
       allow.onclick = async () => {
         if (await reconnect(again)) {
+          await this.allowSessionsToo();
           this.cacheConnected(again);
           return;
         }
         // Rather than one prompt per file, which some browsers would need: choose them again, in one dialog
         delete this.needPermission.cache;
-        this.reask = true;
+        this.reask = again;
         this.showLanding();
       };
       card.append(
         el("h2", "Welcome back"),
         el("p", "Your browser asks before the replay may read the game cache again."),
         allow,
-        el("p", "In Chrome, choose “Allow on every visit” when it asks, and it won't ask again.", "muted"),
+        el("p", `It may name just one file, ${FIRST_ASKED}: that's the game cache's main file. If it offers “Allow on every visit”, choose that and it won't ask again.`, "muted"),
         error,
+      );
+    } else if (this.reask) {
+      // One prompt brought back only some of the files: one dialog, opening where they are, brings back the rest
+      const from = this.reask.find((f) => f.name === FIRST_ASKED) ?? this.reask[0];
+      const choose = el("button", "Choose the files again…", "primary big");
+      choose.onclick = async () => {
+        try {
+          const files = await pickCacheFiles(from);
+          await this.allowSessionsToo();
+          this.cacheConnected(files);
+        } catch (e) {
+          if (!(e instanceof DOMException && e.name === "AbortError")) error.textContent = e instanceof Error ? e.message : String(e);
+        }
+      };
+      const steps = el("ol", "", "landing-steps");
+      steps.append(
+        step("Click Choose the files again: it opens in the game cache's folder", choose, error),
+        step(isWindows() ? "Press Ctrl+A to select every file it lists, then click Open" : "Press Cmd+A to select every file it lists, then click Open"),
+      );
+      card.append(
+        el("h2", "One more step"),
+        el("p", "Your browser gave back only one of the game cache's files. Asking for the others one at a time would be a prompt for each, so instead choose them all again, in one dialog.", "muted"),
+        steps,
+        el("p", isWindows() ? "If it opens somewhere else, paste this into its address bar and press Enter:" : "If it opens somewhere else, press Cmd+Shift+G, paste this and press Enter:", "muted"),
+        copyField(pathOf("cache")),
       );
     } else {
       const choose = el("button", "Choose files…", "primary big");
@@ -125,7 +156,6 @@ export class FolderUi {
       );
       const why = "Only the game's own files (main_file_cache) are listed: the page never gets the rest of that folder, which can hold your game settings and a remembered username.";
       card.append(el("h2", "One-time Game Cache Setup"), el("p", "This allows us to render the game properly", "muted"));
-      if (this.reask) card.append(el("p", "Your browser didn't give back access to all of the game cache's files, so please choose them again: it's one dialog. In Chrome, choosing “Allow on every visit” next time skips this.", "landing-note"));
       if (this.upgraded) card.append(el("p", "The page now asks for just the game cache's files instead of its whole folder, so it can't even see anything else in there. Please choose them once more.", "landing-note"));
       card.append(steps, el("p", why, "muted"));
     }
@@ -140,10 +170,24 @@ export class FolderUi {
     document.body.classList.remove("landing-open");
   }
 
+  /**
+   * On a return visit, the recordings folder in the same click as the game cache, so there's no second
+   * dialog later. Chrome's prompt for a returning site has already brought it back; other prompts ask
+   * for it on its own, which may not be allowed this long after the click, in which case it waits
+   */
+  private async allowSessionsToo(): Promise<void> {
+    const sessions = this.needPermission.sessions;
+    if (!sessions || this.folders.sessions || !(await reconnect(sessions))) return;
+    this.folders.sessions = sessions;
+    delete this.needPermission.sessions;
+    this.refreshButton();
+    this.changed("sessions");
+  }
+
   private cacheConnected(files: FileSystemFileHandle[]): void {
     this.folders.cache = files;
     this.upgraded = false;
-    this.reask = false;
+    this.reask = undefined;
     delete this.needPermission.cache;
     this.hideLanding();
     this.refreshButton();
@@ -166,10 +210,17 @@ export class FolderUi {
     action.onclick = async () => {
       try {
         if (again && !connected) {
-          if (!(await reconnect(again))) return;
+          if (!(await reconnect(again))) {
+            // Not allowed: choose it instead, in a dialog that opens in it
+            delete this.needPermission.sessions;
+            this.sessionsFrom = again;
+            this.open(why);
+            return;
+          }
           this.folders.sessions = again;
         } else {
-          this.folders.sessions = await pickSessionsFolder();
+          this.folders.sessions = await pickSessionsFolder(this.sessionsFrom);
+          this.sessionsFrom = undefined;
         }
         delete this.needPermission.sessions;
         this.refreshButton();
@@ -180,13 +231,24 @@ export class FolderUi {
       }
     };
     const steps = el("ol", "", "landing-steps");
-    steps.append(
-      step("Copy the recordings folder's location", copyField(pathOf("sessions"))),
-      step(isWindows()
-        ? "Click Choose folder, paste the location into the address bar, press Enter, then click Select Folder"
-        : "Click Choose folder, press Cmd+Shift+G, paste the location, press Enter, then click Select", action, error),
-      step("When the browser asks, click View files"),
-    );
+    if (again && !connected) {
+      // Connected before: only the browser's own prompt to answer
+      steps.append(step("Click Allow again", action, error), step("When the browser asks, click Allow"));
+    } else if (this.sessionsFrom) {
+      steps.append(
+        step(isWindows() ? "Click Choose folder: it opens in your recordings folder, so just click Select Folder" : "Click Choose folder: it opens in your recordings folder, so just click Select", action, error),
+        step("When the browser asks, click View files"),
+        step(isWindows() ? "If it opens somewhere else, paste this into its address bar and press Enter:" : "If it opens somewhere else, press Cmd+Shift+G, paste this and press Enter:", copyField(pathOf("sessions"))),
+      );
+    } else {
+      steps.append(
+        step("Copy the recordings folder's location", copyField(pathOf("sessions"))),
+        step(isWindows()
+          ? "Click Choose folder, paste the location into the address bar, press Enter, then click Select Folder"
+          : "Click Choose folder, press Cmd+Shift+G, paste the location, press Enter, then click Select", action, error),
+        step("When the browser asks, click View files"),
+      );
+    }
     this.dialog.replaceChildren(
       el("h2", "Default recording directory"),
       ...(why ? [el("p", why, "why")] : []),

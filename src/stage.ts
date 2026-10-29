@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { Bundle } from "./cache/bundle";
-import { frameAt, frameFrom, lengthOf, npcModel, objectFrameAt, objectModel, playerModel, RigMesh, spotModel, type Built, type Pose } from "./cache/models";
+import { actionEnded, cycleOfFrame, frameAt, lengthOf, npcModel, objectFrameAt, objectModel, playerModel, RigMesh, spotModel, type Built, type Pose } from "./cache/models";
 import { animateTextures } from "./cache/textures";
 import { walkTile, type Target } from "./highlight";
 import { isOthersHit, isYourHit } from "./hits";
@@ -126,7 +126,7 @@ class ActorView {
     this.model?.dispose();
   }
 
-  update(frame: ActorFrame, ground: number, world: World, info: { lines: string[]; icons: string[]; hits: Line[]; say?: string; flash: number; pulseHit?: Line }): void {
+  update(frame: ActorFrame, ground: number, world: World, info: { lines: string[]; icons: string[]; hits: Line[]; say?: string; flash: number; pulseHit?: Line; hpBar: boolean }): void {
     toThree(frame.x, frame.y, ground, this.root.position);
     this.facing.rotation.y = (-frame.orientation * Math.PI * 2) / 2048;
     if (this.boxMaterial) {
@@ -160,7 +160,7 @@ class ActorView {
     this.say.textContent = info.say ?? "";
     this.say.style.display = info.say ? "" : "none";
     this.lines.textContent = info.lines.join("\n");
-    const hp = frame.state.hp;
+    const hp = info.hpBar ? frame.state.hp : undefined;
     this.hpBar.style.display = hp ? "" : "none";
     if (hp) {
       // The game's own bar, as a share of its segments: a percentage, since the exact HP isn't sent
@@ -321,6 +321,8 @@ export class Stage {
   followKey: string | undefined;
   /** Show animation and graphic IDs over heads */
   debugLabels = false;
+  /** Health bars over everyone but you: your own health is in the side panel */
+  hpBars = true;
   /** What a hovered log line or click points at, and when the hover started */
   private targets: Target[] = [];
   private targetsSince = 0;
@@ -481,6 +483,7 @@ export class Stage {
         pulseHit: (this.targets.find((x) => x.kind === "hit") as { line: Line } | undefined)?.line,
         say: says.get(f.key),
         flash: age < FLASH_TICKS ? 1 - age / FLASH_TICKS : 0,
+        hpBar: this.hpBars && f.key !== "me",
       });
     }
     for (const [key, view] of this.actors) {
@@ -537,20 +540,23 @@ export class Stage {
       const tau = this.previewTime();
       return frameAt(bundle, looped.anim, this.preview ? Math.min(tau, this.preview.animLength - 1) : tau);
     }
+    const pose = () => (s.pose != null && s.pose !== -1 ? frameAt(bundle, s.pose, cycle) : undefined);
     if (s.a != null && s.a !== -1) {
+      // It runs out before the next tick's snapshot says so: from then on, it stands or walks again
+      const playing = (since: number) => (actionEnded(bundle, s.a, since) ? pose() : objectFrameAt(bundle, s.a, since));
       const starts = this.animStarts.get(f.key) ?? [];
       for (let i = starts.length - 1; i >= 0; i--) {
         const l = starts[i];
         if (l.t > t) continue;
         if (l.t < t - ANIM_LOOKBACK_TICKS) break;
-        if (l.a === s.a) return frameFrom(bundle, s.a, 0, cycle - l.c);
+        if (l.a === s.a) return playing(cycle - l.c);
         break;
       }
       // Already playing when the recording started: carry on from the recorded frame
       const tick = session.tickAt(t);
-      return frameFrom(bundle, s.a, Math.max(0, s.af), cycle - (tick?.c ?? cycle));
+      return playing(cycleOfFrame(bundle, s.a, Math.max(0, s.af)) + cycle - (tick?.c ?? cycle));
     }
-    return s.pose != null && s.pose !== -1 ? frameAt(bundle, s.pose, cycle) : undefined;
+    return pose();
   }
 
   /** Skull above prayer, as the game stacks them: images from the cache bundle */

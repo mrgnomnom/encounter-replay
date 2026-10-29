@@ -60,9 +60,16 @@ export function ticksFromTail(tail: string): number | undefined {
 /** How much of a file's end to read for its last line */
 export const TAIL_BYTES = 8192;
 
-/** "TFA 5man · 30.6 MB · 2,599 ticks" */
-export function describeRecording(f: RecordingFile): string {
-  const parts = [shownName(f.name), `${(f.size / 1048576).toFixed(1)} MB`];
+/** When it was recorded, as the plugin's list shows it: "27 Oct, 02:59", with the year only when it isn't this one */
+export function shownTime(when: number, now = Date.now()): string {
+  const date = new Date(when);
+  const year = date.getFullYear() !== new Date(now).getFullYear();
+  return date.toLocaleString("en-GB", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}), hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
+/** "TFA 5man · 27 Oct, 02:59 · 30.6 MB · 2,599 ticks" */
+export function describeRecording(f: RecordingFile, now = Date.now()): string {
+  const parts = [shownName(f.name), shownTime(recordedAt(f), now), `${(f.size / 1048576).toFixed(1)} MB`];
   if (f.ticks !== undefined) parts.push(`${f.ticks.toLocaleString("en-GB")} ticks`);
   return parts.join(" · ");
 }

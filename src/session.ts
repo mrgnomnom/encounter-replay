@@ -84,6 +84,22 @@ export interface Line {
   [field: string]: any;
 }
 
+/**
+ * A walk click's tile is the recorder's guess, the tile under the mouse, which can be a tile off. Since
+ * format 6 a "dest" line follows with the tile the client itself worked out from the click and walked
+ * you to: that replaces the guess
+ */
+function exactWalkTiles(lines: Line[]): void {
+  const walks = new Map<number, Line>();
+  for (const l of lines) {
+    if (l.e === "click" && l.action === "WALK") walks.set(l.c, l);
+    else if (l.e === "dest" && l.click != null) {
+      const click = walks.get(l.click);
+      if (click) click.tile = { x: l.x, y: l.y, p: l.p, pl: l.pl, sx: l.sx, sy: l.sy };
+    }
+  }
+}
+
 export function refKey(ref: Ref | undefined): string {
   if (!ref) return "";
   switch (ref.k) {
@@ -120,6 +136,7 @@ export class Session {
   private constructor(lines: Line[], unreadable: number) {
     this.lines = lines;
     this.unreadable = unreadable;
+    exactWalkTiles(lines);
     let last = 0;
     for (const l of lines) last = Math.max(last, l.t ?? 0);
     this.byTick = Array.from({ length: last + 1 }, () => []);

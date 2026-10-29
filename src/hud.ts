@@ -647,6 +647,7 @@ export function describe(session: Session, l: Line): string {
     case "sound": return `sound ${l.id}${l.from ? " from " + who(l.from) : ""}${l.delay ? " delay " + l.delay : ""}`;
     case "area_sound": return `area sound ${l.id} at ${l.x},${l.y}`;
     case "click": return `click: ${l.option} ${l.target || ""}`.trim();
+    case "dest": return `walking to ${l.x},${l.y}${l.click != null ? "" : " (minimap, or not a Walk here)"}`;
     case "items": return `${l.which === "inv" ? "inventory" : "equipment"} changed`;
     case "target": {
       if (l.at) return `${who(l.who)} ${verb(l.who, "target")} ${who(l.at)}`;

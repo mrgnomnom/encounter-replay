@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bundle } from "./bundle";
-import { frameAt, frameFrom, steppedIndex } from "./models";
+import { actionEnded, cycleOfFrame, frameAt, frameFrom, steppedIndex } from "./models";
 import { Rig } from "./rig";
 
 const b64 = (a: Int32Array | Int16Array | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(a.buffer)));
@@ -87,3 +87,29 @@ describe("object animation endings", () => {
   });
 });
 
+describe("player and NPC animation endings", () => {
+  const actions = new Bundle({
+    format: 1, npcs: {}, objects: {}, items: {}, kits: {}, spotanims: {}, terrain: [], textures: {}, models: {},
+    sequences: {
+      // A special attack: 40 cycles, played once
+      1: { frames: [1, 2, 3, 4], lengths: [10, 10, 10, 10], frameStep: -1, loops: 99 },
+      // Its last two frames loop, three times through in all
+      2: { frames: [1, 2, 3, 4], lengths: [10, 10, 10, 10], frameStep: 2, loops: 3 },
+    },
+  } as never);
+
+  it("ends at its length rather than starting over", () => {
+    expect(actionEnded(actions, 1, 39)).toBe(false);
+    expect(actionEnded(actions, 1, 40)).toBe(true);
+    expect(actionEnded(actions, 1, 55)).toBe(true);
+  });
+
+  it("ends after its last loop, counting the first time through", () => {
+    expect(actionEnded(actions, 2, 40 + 20 + 19)).toBe(false);
+    expect(actionEnded(actions, 2, 40 + 20 + 20)).toBe(true);
+  });
+
+  it("counts a recorded frame as the cycles before it", () => {
+    expect(cycleOfFrame(actions, 1, 2)).toBe(20);
+  });
+});

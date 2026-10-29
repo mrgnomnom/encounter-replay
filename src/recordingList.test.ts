@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRecording, shownName, sortRecordings, ticksFromTail } from "./recordingList";
+import { describeRecording, shownName, shownTime, sortRecordings, ticksFromTail } from "./recordingList";
 
 describe("recording list", () => {
   it("names recordings as the plugin's panel does", () => {
@@ -25,6 +25,11 @@ describe("recording list", () => {
   });
 
   it("shows name, size and ticks", () => {
-    expect(describeRecording({ name: "20261027-025914-TFA-5man_1.jsonl", size: 32074250, modified: 0, ticks: 2599 })).toBe("TFA 5man-1 · 30.6 MB · 2,599 ticks");
+    const now = new Date(2026, 9, 28).getTime();
+    expect(describeRecording({ name: "20261027-025914-TFA-5man_1.jsonl", size: 32074250, modified: 0, ticks: 2599 }, now)).toBe("TFA 5man-1 · 27 Oct, 02:59 · 30.6 MB · 2,599 ticks");
+  });
+
+  it("shows the year only when it isn't this one", () => {
+    expect(shownTime(new Date(2025, 11, 31, 23, 5).getTime(), new Date(2026, 0, 1).getTime())).toBe("31 Dec 2025, 23:05");
   });
 });

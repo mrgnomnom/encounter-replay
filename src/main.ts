@@ -483,6 +483,12 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   }
 });
 renderer.domElement.addEventListener("pointerup", () => { panFrom = undefined; });
+const hpBarsBox = $<HTMLInputElement>("hpBars");
+hpBarsBox.checked = stage.hpBars = recallText("replay.hpBars") !== "off";
+hpBarsBox.onchange = () => {
+  stage.hpBars = hpBarsBox.checked;
+  rememberText("replay.hpBars", hpBarsBox.checked ? "on" : "off");
+};
 $<HTMLInputElement>("labels").onchange = (e) => {
   const on = (e.target as HTMLInputElement).checked;
   document.body.classList.toggle("no-object-labels", !on);
@@ -597,8 +603,14 @@ const folderUi = new FolderUi((kind) => {
   else if (session && !bundle && folderUi.folders.cache) void buildFromCache(folderUi.folders.cache);
   // Arrived from the plugin's Open replay button: once the game cache is set up, open its recording;
   // otherwise, the first time, the tutorial
-  else if (!openFromHash() && !tutorialDone()) void tour.start();
+  else if (!linkedSession() && !tutorialDone()) void tour.start();
 });
+
+/** Whether the page was opened on a recording (#session=<file>), and if so opens it, or asks for the folder it's in */
+function linkedSession(): boolean {
+  const linked = new URLSearchParams(location.hash.slice(1)).has("session");
+  return openFromHash() || linked;
+}
 
 // The tutorial, on the demo recording that ships with the page
 const tour = new Tour({
@@ -710,7 +722,7 @@ $<HTMLSelectElement>("recordings").onchange = async (e) => {
 const skipLanding = import.meta.env.DEV && ["session", "demo", "devCache", "skipLanding", "tour"].some((p) => params.has(p));
 void folderUi.restore(skipLanding).then(() => {
   void listRecordings();
-  if (!openFromHash() && folderUi.folders.cache && !skipLanding && !tutorialDone()) void tour.start();
+  if (!linkedSession() && folderUi.folders.cache && !skipLanding && !tutorialDone()) void tour.start();
 });
 
 // Files: the session is read in the page and never leaves it

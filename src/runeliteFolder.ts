@@ -53,9 +53,14 @@ export function onRead(listener: () => void): void {
 }
 
 /** Asks for the recordings folder, and turns away any other folder, .runelite above all */
-export async function pickSessionsFolder(): Promise<FileSystemDirectoryHandle> {
+export async function pickSessionsFolder(startIn?: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle> {
   const picker = (window as unknown as { showDirectoryPicker: (o: object) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
-  const dir = await picker({ id: "runelite-sessions", mode: "read" });
+  const options = { id: "runelite-sessions", mode: "read" };
+  // Choosing it again: the dialog opens in the folder itself, so it's just Select Folder
+  const dir = await picker(startIn ? { ...options, startIn } : options).catch((e: unknown) => {
+    if (!startIn || (e instanceof DOMException && e.name === "AbortError")) throw e;
+    return picker(options);
+  });
   const where = FOLDER_PATHS.sessions.windows.replace("%USERPROFILE%\\", "");
   if (await hasEntry(dir, "credentials.properties") || await hasEntry(dir, "profiles2") || dir.name === ".runelite") {
     throw new Error(`That's your whole .runelite folder, which also holds your logins: this page doesn't want it. Pick ${where} inside it instead.`);
@@ -69,13 +74,19 @@ export async function pickSessionsFolder(): Promise<FileSystemDirectoryHandle> {
  * Asks for the game cache's files: the picker lists only main_file_cache files, and any other file is
  * dropped. All of them are needed: the data file, and every index the master index (idx255) lists
  */
-export async function pickCacheFiles(): Promise<FileSystemFileHandle[]> {
+export async function pickCacheFiles(startIn?: FileSystemFileHandle): Promise<FileSystemFileHandle[]> {
   const picker = (window as unknown as { showOpenFilePicker: (o: object) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker;
-  const chosen = await picker({
+  const options = {
     id: "runelite-cache",
     multiple: true,
     excludeAcceptAllOption: true,
     types: [{ description: "Game cache files (main_file_cache)", accept: { "application/octet-stream": CACHE_EXTENSIONS } }],
+  };
+  // Choosing them again: the dialog opens in the folder of a file chosen before, so it's just select all and Open
+  const chosen = await picker(startIn ? { ...options, startIn } : options).catch((e: unknown) => {
+    if (!startIn || (e instanceof DOMException && e.name === "AbortError")) throw e;
+    // A browser that won't start there: wherever it last was instead
+    return picker(options);
   });
   const files = chosen.filter((f) => CACHE_FILE.test(f.name));
   const names = new Set(files.map((f) => f.name));
@@ -132,17 +143,23 @@ export async function rememberedFolders(): Promise<{ ready: Folders; needPermiss
   return { ready, needPermission, upgraded };
 }
 
-/** Asks again for permission to read what was connected before: needs a click */
+/** The file a browser's prompt names when it asks about the game cache file by file */
+export const FIRST_ASKED = "main_file_cache.dat2";
+
 /**
- * Asks once. Chrome's prompt for a returning site lists everything it had before and restores it all
- * (and offers "Allow on every visit"); browsers without it would ask file by file, each needing a click
- * of its own, so if one prompt doesn't bring everything back this gives up rather than asking again
+ * Asks again for permission to read what was connected before, which needs a click. Asks once: Chrome's
+ * prompt for a returning site lists everything it had before and restores it all (and offers "Allow on
+ * every visit"), but its plain prompt, and other browsers', ask file by file, each needing a click of its
+ * own, so if one prompt doesn't bring everything back this gives up rather than asking again
  */
+
 export async function reconnect(what: FileSystemDirectoryHandle | FileSystemFileHandle[]): Promise<boolean> {
   const handles = Array.isArray(what) ? what : [what];
   try {
     const waiting: FileSystemHandle[] = [];
     for (const h of handles) if ((await permission(h)) !== "granted") waiting.push(h);
+    // A prompt that names a single file names the data file, as the welcome back screen says it will
+    waiting.sort((a, b) => Number(b.name === FIRST_ASKED) - Number(a.name === FIRST_ASKED));
     if (waiting.length && (await (waiting[0] as unknown as Permissioned).requestPermission({ mode: "read" })) !== "granted") return false;
     for (const h of handles) if ((await permission(h)) !== "granted") return false;
     return true;

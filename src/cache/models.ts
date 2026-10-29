@@ -181,12 +181,42 @@ export function lengthOf(bundle: Bundle, sequence: number): number | undefined {
 /** The pose a recorded frame index stands for, a number of cycles later */
 export function frameFrom(bundle: Bundle, sequence: number, index: number, cycles: number): Pose | undefined {
   const seq = bundle.sequence(sequence);
+  if (!seq?.skeletal && (!seq?.frames?.length || !seq.lengths)) return undefined;
+  return frameAt(bundle, sequence, cycleOfFrame(bundle, sequence, index) + cycles);
+}
+
+/** How many cycles into an animation a frame starts */
+export function cycleOfFrame(bundle: Bundle, sequence: number, index: number): number {
+  const seq = bundle.sequence(sequence);
   // A skeletal animation's frame index is already a count of cycles
-  if (seq?.skeletal) return frameAt(bundle, sequence, index + cycles);
-  if (!seq?.frames?.length || !seq.lengths) return undefined;
+  if (!seq || seq.skeletal) return index;
+  const lengths = seq.lengths ?? [];
   let start = 0;
-  for (let i = 0; i < Math.min(index, seq.lengths.length); i++) start += Math.max(1, seq.lengths[i]);
-  return frameAt(bundle, sequence, start + cycles);
+  for (let i = 0; i < Math.min(index, lengths.length); i++) start += Math.max(1, lengths[i]);
+  return start;
+}
+
+/**
+ * Whether a player's or NPC's animation has run out after a number of cycles. The game steps it as it
+ * does an object's (see objectFrameAt), but at the end of its last loop, or at its end if it doesn't
+ * loop, the animation stops and the actor goes back to standing or walking
+ */
+export function actionEnded(bundle: Bundle, sequence: number, cycles: number): boolean {
+  const seq = bundle.sequence(sequence);
+  if (!seq) return false;
+  const lengths = seq.skeletal
+    ? Array<number>(Math.max(1, seq.skeletal.end - seq.skeletal.start)).fill(1)
+    : seq.lengths?.map((l) => Math.max(1, l));
+  if (!lengths?.length) return false;
+  const total = lengths.reduce((a, b) => a + b, 0);
+  const c = Math.floor(cycles);
+  if (c < total) return false;
+  const n = lengths.length;
+  const step = seq.frameStep;
+  if (step <= 0 || step > n) return true;
+  const loopLength = lengths.slice(n - step).reduce((a, b) => a + b, 0);
+  // The first time through counts as one of its loops
+  return Math.floor((c - total) / loopLength) + 1 >= Math.max(1, seq.loops);
 }
 
 /** A three.js mesh drawing a rig, redrawn whenever its pose changes */
