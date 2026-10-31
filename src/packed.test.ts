@@ -1,6 +1,6 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { isGzip, pack, RECORDING_NAME, recordingText, ticksFromHeader, withoutEnding } from "./packed";
+import { isGzip, MAX_RECORDING, pack, RECORDING_NAME, RecordingTooLarge, recordingText, ticksFromHeader, withoutEnding } from "./packed";
 import { shownName } from "./recordingList";
 
 const LINES = '{"t":0,"c":1,"e":"header"}\n{"t":0,"c":2,"e":"tick"}\n{"t":1,"c":32,"e":"tick"}\n';
@@ -39,6 +39,29 @@ describe("packed recordings", () => {
     expect(text.length).toBeGreaterThan(0);
     expect(text.endsWith("\n")).toBe(true);
     expect(long.startsWith(text)).toBe(true);
+  });
+
+  it("stops unpacking a gzip past the limit, whatever it's named", async () => {
+    const bomb = new Uint8Array(gzipSync(Buffer.alloc(8 * 1024 * 1024)));
+    expect(bomb.length).toBeLessThan(16 * 1024);
+    await expect(recordingText(new Blob([bomb]), 1024 * 1024)).rejects.toThrow(RecordingTooLarge);
+    await expect(recordingText(new File([bomb], "clip.jsonl"), 1024 * 1024)).rejects.toThrow("clip.jsonl is too large to open: it holds over 1 MB");
+  });
+
+  it("refuses a plain recording past the limit, and opens one exactly at it", async () => {
+    await expect(recordingText(new Blob([LINES]), LINES.length - 1)).rejects.toThrow(RecordingTooLarge);
+    expect(await recordingText(new Blob([LINES]), LINES.length)).toBe(LINES);
+    expect(await recordingText(new Blob([new Uint8Array(gzipSync(LINES))]), LINES.length)).toBe(LINES);
+  });
+
+  it("refuses a gzip past the limit even if it's cut off, rather than keeping part of it", async () => {
+    const bomb = gzipSync(Buffer.alloc(8 * 1024 * 1024, "x"));
+    await expect(recordingText(new Blob([new Uint8Array(bomb.subarray(0, bomb.length - 12))]), 1024 * 1024)).rejects.toThrow(RecordingTooLarge);
+  });
+
+  it("allows far more than the longest real recording, within what a browser can hold", () => {
+    expect(MAX_RECORDING).toBeGreaterThan(40 * 1000 * 1000 * 12);
+    expect(MAX_RECORDING).toBeLessThan(2 ** 29 - 24);
   });
 
   it("names packed recordings as the plugin does, and only plain file names", () => {

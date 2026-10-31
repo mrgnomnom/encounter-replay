@@ -25,7 +25,7 @@ import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { VIEWS } from "./timelineViews";
 import { describeRecording, type RecordingFile } from "./recordingList";
-import { recordingText, RECORDING_NAME, withoutEnding } from "./packed";
+import { RecordingTooLarge, recordingText, RECORDING_NAME, withoutEnding } from "./packed";
 import { preloadTextures } from "./cache/textures";
 import { toThree, World } from "./world";
 
@@ -670,7 +670,7 @@ function openFromHash(): boolean {
     return false;
   }
   history.replaceState(null, "", location.pathname + location.search);
-  readSession(sessions, name).then((text) => open(text, name), () => ($("drop").textContent = `${name} isn't in your recordings folder`));
+  readSession(sessions, name).then((text) => open(text, name), (e) => cantOpen(e, `${name} isn't in your recordings folder`));
   return true;
 }
 window.addEventListener("hashchange", () => void openFromHash());
@@ -716,8 +716,11 @@ $<HTMLSelectElement>("recordings").onchange = async (e) => {
   const name = (e.target as HTMLSelectElement).value;
   if (!name) return;
   const sessions = folderUi.folders.sessions;
-  const text = sessions ? await readSession(sessions, name) : await recordingText(await (await fetch(`recordings/${encodeURIComponent(name)}`)).blob());
-  open(text, name);
+  try {
+    open(sessions ? await readSession(sessions, name) : await recordingText(await (await fetch(`recordings/${encodeURIComponent(name)}`)).blob()), name);
+  } catch (e) {
+    cantOpen(e, `couldn't open ${name}`);
+  }
 };
 // In development, ?session, ?demo, ?devCache and ?skipLanding open straight into the replay, past the landing page
 const skipLanding = import.meta.env.DEV && ["session", "demo", "devCache", "skipLanding", "tour"].some((p) => params.has(p));
@@ -727,6 +730,11 @@ void folderUi.restore(skipLanding).then(() => {
 });
 
 // Files: the session is read in the page and never leaves it
+
+/** Says why a recording didn't open: on the drop area, or by the controls if one is already showing */
+function cantOpen(e: unknown, otherwise: string): void {
+  $(session ? "bundleStatus" : "drop").textContent = e instanceof RecordingTooLarge ? e.message : otherwise;
+}
 
 function openFile(file: File): void {
   // A cache bundle dropped on its own goes with the session already open
@@ -738,7 +746,7 @@ function openFile(file: File): void {
     });
     return;
   }
-  recordingText(file).then((text) => open(text, file.name));
+  recordingText(file).then((text) => open(text, file.name)).catch((e) => cantOpen(e, `couldn't open ${file.name}`));
 }
 $("openSession").onclick = () => void openWithPicker();
 $<HTMLInputElement>("file").onchange = (e) => {
@@ -914,7 +922,7 @@ if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl(?:\.gz)?$/.
         row?.dispatchEvent(new MouseEvent("mouseenter"));
       }, 1500);
     }
-  });
+  }).catch((e) => cantOpen(e, `couldn't open ${sessionPath}`));
 }
 // Works offline after the first visit (public/sw.js); not in development, where files change constantly
 if (!import.meta.env.DEV && "serviceWorker" in navigator) void navigator.serviceWorker.register("sw.js").catch(() => undefined);

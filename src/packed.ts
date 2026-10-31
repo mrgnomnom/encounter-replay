@@ -17,16 +17,45 @@ export function isGzip(head: Uint8Array): boolean {
   return head.length >= 2 && head[0] === 0x1f && head[1] === 0x8b;
 }
 
-/** A recording's text, unpacked if it's gzipped. One cut off partway keeps the whole lines that came out of it */
-export async function recordingText(file: Blob): Promise<string> {
-  if (!isGzip(new Uint8Array(await file.slice(0, 2).arrayBuffer()))) return file.text();
+/**
+ * The most a recording may hold, in characters. A gzip can unpack to a thousand times its size, so without
+ * this a small file from someone else could fill the tab's memory. Browsers can't hold a string past about
+ * 512 MB anyway, and the plugin's busiest recordings take 12 MB per 1,000 ticks, so nothing real gets near it
+ */
+export const MAX_RECORDING = 500 * 1024 * 1024;
+
+export class RecordingTooLarge extends Error {
+  constructor(name: string, limit: number) {
+    super(`${name} is too large to open: it holds over ${Math.round(limit / (1024 * 1024))} MB`);
+  }
+}
+
+/**
+ * A recording's text, unpacked if it's gzipped. One cut off partway keeps the whole lines that came out of
+ * it. Decides by the file's first bytes, not its name, so the limit holds for a gzip named anything
+ */
+export async function recordingText(file: Blob, limit = MAX_RECORDING): Promise<string> {
+  const name = file instanceof File ? file.name : "That recording";
+  if (!isGzip(new Uint8Array(await file.slice(0, 2).arrayBuffer()))) {
+    if (file.size > limit) throw new RecordingTooLarge(name, limit);
+    return file.text();
+  }
   const reader = file.stream().pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream()).getReader();
   const parts: string[] = [];
+  let size = 0;
   try {
-    for (let r = await reader.read(); !r.done; r = await reader.read()) parts.push(r.value);
+    for (let r = await reader.read(); !r.done; r = await reader.read()) {
+      size += r.value.length;
+      if (size > limit) break;
+      parts.push(r.value);
+    }
   } catch {
     const text = parts.join("");
     return text.slice(0, text.lastIndexOf("\n") + 1);
+  }
+  if (size > limit) {
+    await reader.cancel().catch(() => undefined);
+    throw new RecordingTooLarge(name, limit);
   }
   return parts.join("");
 }
