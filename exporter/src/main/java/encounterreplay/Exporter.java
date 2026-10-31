@@ -321,6 +321,26 @@ public class Exporter
 
 	// ---------- cache access ----------
 
+	/** Fills in noted, bought and placeholder items, as the game does: the cache leaves their look and name blank */
+	private static void link(Map<Integer, ItemDefinition> items, Map<Integer, ItemDefinition> from)
+	{
+		for (ItemDefinition d : items.values())
+		{
+			if (d.notedTemplate != -1 && from.containsKey(d.notedTemplate) && from.containsKey(d.notedID))
+			{
+				d.linkNote(from.get(d.notedTemplate), from.get(d.notedID));
+			}
+			if (d.boughtTemplateId != -1 && from.containsKey(d.boughtTemplateId) && from.containsKey(d.boughtId))
+			{
+				d.linkBought(from.get(d.boughtTemplateId), from.get(d.boughtId));
+			}
+			if (d.placeholderTemplateId != -1 && from.containsKey(d.placeholderTemplateId) && from.containsKey(d.placeholderId))
+			{
+				d.linkPlaceholder(from.get(d.placeholderTemplateId), from.get(d.placeholderId));
+			}
+		}
+	}
+
 	private <T> Map<Integer, T> loadConfig(ConfigType type, Set<Integer> wanted, BiFunction<Integer, byte[], T> load) throws IOException
 	{
 		Index index = store.getIndex(IndexType.CONFIGS);
@@ -391,6 +411,24 @@ public class Exporter
 		{
 			items.putAll(loadConfig(ConfigType.ITEM, variants, itemLoader::load));
 		}
+		// Noted, bought and placeholder items take their look and name from other items
+		Set<Integer> linkedIds = new TreeSet<>();
+		for (ItemDefinition d : items.values())
+		{
+			for (int id : new int[]{d.notedTemplate, d.notedID, d.boughtTemplateId, d.boughtId, d.placeholderTemplateId, d.placeholderId})
+			{
+				if (id != -1 && !items.containsKey(id))
+				{
+					linkedIds.add(id);
+				}
+			}
+		}
+		Map<Integer, ItemDefinition> linked = new HashMap<>(items);
+		if (!linkedIds.isEmpty())
+		{
+			linked.putAll(loadConfig(ConfigType.ITEM, linkedIds, itemLoader::load));
+		}
+		link(items, linked);
 		KitLoader kitLoader = new KitLoader();
 		Map<Integer, KitDefinition> kits = loadConfig(ConfigType.IDENTKIT, kitIds, kitLoader::load);
 		SpotAnimLoader spotLoader = new SpotAnimLoader();
@@ -1112,6 +1150,7 @@ public class Exporter
 			spriteIds.add(id);
 		}
 		Map<Integer, ItemDefinition> allItems = loadConfig(ConfigType.ITEM, null, new ItemLoader()::load);
+		link(allItems, allItems);
 		writeSpells(bundle, allItems, spriteIds);
 		writeCombatStyles(bundle, spriteIds);
 		for (int id : spriteIds)

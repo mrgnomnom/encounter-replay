@@ -121,6 +121,11 @@ class BundleBuilder {
     const variants = new Set<number>();
     for (const d of items.values()) for (const v of d.countObj ?? []) if (v > 0 && !items.has(v)) variants.add(v);
     if (variants.size) for (const [id, d] of await this.loadConfig(ConfigType.ITEM, variants, (i, data) => itemLoader.load(i, data))) items.set(id, d);
+    // Noted, bought and placeholder items take their look and name from other items
+    const linkedIds = new Set<number>();
+    for (const d of items.values()) for (const id of d.linkedIds()) if (!items.has(id)) linkedIds.add(id);
+    const linked = linkedIds.size ? await this.loadConfig(ConfigType.ITEM, linkedIds, (id, data) => itemLoader.load(id, data)) : new Map<number, ItemDefinition>();
+    for (const d of items.values()) d.link((id) => items.get(id) ?? linked.get(id));
     const kitLoader = new KitLoader();
     const kits = await this.loadConfig(ConfigType.IDENTKIT, this.kitIds, (id, data) => kitLoader.load(id, data));
     const spotLoader = new SpotAnimLoader();
@@ -710,6 +715,7 @@ class BundleBuilder {
     const spriteIds = new Set<number>([...this.widgetSprites, ...UI_SPRITES]);
     const itemLoader = new ItemLoader();
     const allItems = await this.loadConfig(ConfigType.ITEM, null, (id, data) => itemLoader.load(id, data));
+    for (const d of allItems.values()) d.link((id) => allItems.get(id));
     writeSpells(bundle, allItems, spriteIds);
     await this.writeCombatStyles(bundle, spriteIds);
     const ui: Json = {};

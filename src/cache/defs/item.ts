@@ -67,6 +67,30 @@ export class ItemDefinition {
 
   getId(): number { return this.id; }
 
+  /** The items this one takes its look and name from, if it's noted, bought or a placeholder */
+  linkedIds(): number[] {
+    const ids: number[] = [];
+    if (this.notedTemplate !== -1) ids.push(this.notedTemplate, this.notedID);
+    if (this.boughtTemplateId !== -1) ids.push(this.boughtTemplateId, this.boughtId);
+    if (this.placeholderTemplateId !== -1) ids.push(this.placeholderTemplateId, this.placeholderId);
+    return ids;
+  }
+
+  /**
+   * Fills in a noted, bought or placeholder item, as the game does when it loads one. The cache leaves their
+   * look and name blank, and a blank model is 0, which is a man's head
+   */
+  link(item: (id: number) => ItemDefinition | undefined): void {
+    const both = (template: number, other: number, link: (a: ItemDefinition, b: ItemDefinition) => void) => {
+      const a = item(template);
+      const b = item(other);
+      if (a && b) link(a, b);
+    };
+    if (this.notedTemplate !== -1) both(this.notedTemplate, this.notedID, (a, b) => this.linkNote(a, b));
+    if (this.boughtTemplateId !== -1) both(this.boughtTemplateId, this.boughtId, (a, b) => this.linkBought(a, b));
+    if (this.placeholderTemplateId !== -1) both(this.placeholderTemplateId, this.placeholderId, (a, b) => this.linkPlaceholder(a, b));
+  }
+
   linkNote(notedItem: ItemDefinition, unnotedItem: ItemDefinition): void {
     this.inventoryModel = notedItem.inventoryModel;
     this.zoom2d = notedItem.zoom2d;
