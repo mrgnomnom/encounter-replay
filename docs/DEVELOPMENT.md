@@ -21,7 +21,8 @@ Then open http://127.0.0.1:5180. Besides connected folders, the dev server lists
 sessions folder under **Recordings…** (found from Windows or WSL; set `ENCOUNTER_SESSIONS` to point
 elsewhere), and without a connected cache it falls back to bundles from the Java exporter (below).
 Sessions copied into the git-ignored `sessions/` folder open straight from the URL, and `t` jumps to a
-moment:
+moment. The recorder packs recordings as `.jsonl.gz` when they stop; the page, `?session=` and the
+`audit`, `parity` and `trim-session` scripts take packed and plain ones alike (`src/packed.ts`):
 
 ```
 http://127.0.0.1:5180/?session=sessions/tfa.jsonl&t=60.5

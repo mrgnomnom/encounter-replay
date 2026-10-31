@@ -1,4 +1,5 @@
 import type { CacheSource } from "./cache/store/store";
+import { recordingText, RECORDING_NAME, ticksFromHeader } from "./packed";
 import { sortRecordings, TAIL_BYTES, ticksFromTail, type RecordingFile } from "./recordingList";
 
 /**
@@ -185,24 +186,42 @@ const knownTicks = new Map<string, number | undefined>();
 export async function listSessions(sessions: FileSystemDirectoryHandle): Promise<RecordingFile[]> {
   const out: RecordingFile[] = [];
   for await (const entry of (sessions as unknown as { values: () => AsyncIterable<FileSystemHandle> }).values()) {
-    if (entry.kind !== "file" || !entry.name.endsWith(".jsonl")) continue;
+    if (entry.kind !== "file" || !RECORDING_NAME.test(entry.name)) continue;
     const file = await (entry as FileSystemFileHandle).getFile();
     const key = `${entry.name}:${file.size}:${file.lastModified}`;
     if (!knownTicks.has(key)) {
-      // Only the end of the file, for its last tick: recordings run to tens of megabytes
-      const tail = await file.slice(Math.max(0, file.size - TAIL_BYTES)).text();
-      noteRead(entry.name, tail.length);
-      knownTicks.set(key, ticksFromTail(tail));
+      if (entry.name.endsWith(".gz")) {
+        // Packed: its length is in the gzip header
+        const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+        noteRead(entry.name, head.length);
+        knownTicks.set(key, ticksFromHeader(head));
+      } else {
+        // Only the end of the file, for its last tick: recordings run to tens of megabytes
+        const tail = await file.slice(Math.max(0, file.size - TAIL_BYTES)).text();
+        noteRead(entry.name, tail.length);
+        knownTicks.set(key, ticksFromTail(tail));
+      }
     }
     out.push({ name: entry.name, size: file.size, modified: file.lastModified, ticks: knownTicks.get(key) });
   }
   return sortRecordings(out);
 }
 
+/**
+ * A recording's text, unpacked if it's gzipped. A plain one asked for by name may have been packed since
+ * (the plugin packs a recording moments after it stops), so its .gz is tried next
+ */
 export async function readSession(sessions: FileSystemDirectoryHandle, name: string): Promise<string> {
-  const text = await (await (await sessions.getFileHandle(name)).getFile()).text();
-  noteRead(name, text.length);
-  return text;
+  let handle: FileSystemFileHandle;
+  try {
+    handle = await sessions.getFileHandle(name);
+  } catch (e) {
+    if (!name.endsWith(".jsonl")) throw e;
+    handle = await sessions.getFileHandle(`${name}.gz`);
+  }
+  const file = await handle.getFile();
+  noteRead(handle.name, file.size);
+  return recordingText(file);
 }
 
 /**

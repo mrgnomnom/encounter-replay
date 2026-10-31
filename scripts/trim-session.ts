@@ -3,8 +3,9 @@
  *
  *   npx vite-node scripts/trim-session.ts <in.jsonl> <from> <to> <out.jsonl> ["Old name=New name" ...]
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { namePattern, toJsonl, trimLines, type RawLine } from "../src/trim";
+import { readRecordingSync } from "./recordingFile";
 
 const [input, fromArg, toArg, output, ...renameArgs] = process.argv.slice(2);
 if (!input || !output) {
@@ -13,7 +14,7 @@ if (!input || !output) {
 }
 const from = Number(fromArg);
 const to = Number(toArg);
-const lines: RawLine[] = readFileSync(input, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+const lines: RawLine[] = readRecordingSync(input).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 const renames = renameArgs.map((r) => r.split("=") as [string, string]);
 const out = trimLines(lines, from, to, { renames });
 const text = toJsonl(out);

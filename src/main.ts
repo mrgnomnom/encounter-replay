@@ -25,6 +25,7 @@ import { NotesUi } from "./notesUi";
 import { listSessions, noteRead, readSession } from "./runeliteFolder";
 import { VIEWS } from "./timelineViews";
 import { describeRecording, type RecordingFile } from "./recordingList";
+import { recordingText, RECORDING_NAME, withoutEnding } from "./packed";
 import { preloadTextures } from "./cache/textures";
 import { toThree, World } from "./world";
 
@@ -155,7 +156,7 @@ function open(text: string, name: string): void {
   stage.load(session, undefined);
   objectLayer.load(undefined);
   // Models come from a cache bundle exported for this session, if there is one next to the page
-  const base = name.replace(/\.jsonl$/, "");
+  const base = withoutEnding(name);
   sessionBase = base;
   const opened = session;
   // With the game cache connected, models come straight from it
@@ -226,7 +227,7 @@ function devBundle(name: string, base: string, opened: Session): void {
     if (session !== opened) return;
     // No models yet for a recording in the sessions folder: export them now, then load
     let failure: string | undefined;
-    if (!b && /^[\w.-]+\.jsonl$/.test(name)) {
+    if (!b && RECORDING_NAME.test(name)) {
       $("bundleStatus").textContent = "exporting models from the game cache…";
       const r = await fetch(`export/${encodeURIComponent(name)}`, { method: "POST" }).catch(() => undefined);
       if (session !== opened) return;
@@ -589,7 +590,7 @@ async function openWithPicker(): Promise<void> {
   try {
     // Starts in the recordings folder when it's connected
     const startIn = folderUi.folders.sessions;
-    const [handle] = await picker({ id: "encounter-sessions", ...(startIn ? { startIn } : {}), types: [{ description: "Encounter Recorder sessions", accept: { "application/x-ndjson": [".jsonl"] } }] });
+    const [handle] = await picker({ id: "encounter-sessions", ...(startIn ? { startIn } : {}), types: [{ description: "Encounter Recorder sessions", accept: { "application/x-ndjson": [".jsonl"], "application/gzip": [".gz"] } }] });
     openFile(await handle.getFile());
     try { localStorage.setItem("replay.pickerLearned", "1"); } catch { /* storage blocked */ }
   } catch {
@@ -660,7 +661,7 @@ addSupport(document.querySelector("header")!);
 /** #session=<file> opens a recording from the connected folder: the recorder's Replay button links here */
 function openFromHash(): boolean {
   const name = new URLSearchParams(location.hash.slice(1)).get("session");
-  if (!name || !/^[\w.-]+\.jsonl$/.test(name)) return false;
+  if (!name || !RECORDING_NAME.test(name)) return false;
   // The landing page sets up the game cache first
   if (!folderUi.folders.cache) return false;
   const sessions = folderUi.folders.sessions;
@@ -715,7 +716,7 @@ $<HTMLSelectElement>("recordings").onchange = async (e) => {
   const name = (e.target as HTMLSelectElement).value;
   if (!name) return;
   const sessions = folderUi.folders.sessions;
-  const text = sessions ? await readSession(sessions, name) : await (await fetch(`recordings/${encodeURIComponent(name)}`)).text();
+  const text = sessions ? await readSession(sessions, name) : await recordingText(await (await fetch(`recordings/${encodeURIComponent(name)}`)).blob());
   open(text, name);
 };
 // In development, ?session, ?demo, ?devCache and ?skipLanding open straight into the replay, past the landing page
@@ -737,7 +738,7 @@ function openFile(file: File): void {
     });
     return;
   }
-  file.text().then((text) => open(text, file.name));
+  recordingText(file).then((text) => open(text, file.name));
 }
 $("openSession").onclick = () => void openWithPicker();
 $<HTMLInputElement>("file").onchange = (e) => {
@@ -871,10 +872,10 @@ if (params.has("demo")) {
 }
 // ?session=sessions/name.jsonl opens a recording from the git-ignored sessions folder next to this page
 const sessionPath = params.get("session");
-if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl$/.test(sessionPath)) {
+if (import.meta.env.DEV && sessionPath && /^sessions\/[\w.-]+\.jsonl(?:\.gz)?$/.test(sessionPath)) {
   // ?accuracy turns the click accuracy view on, e.g. for screenshots
   if (params.has("accuracy")) $<HTMLInputElement>("accuracy").checked = true;
-  fetch(sessionPath).then((r) => r.text()).then((text) => {
+  fetch(sessionPath).then((r) => r.blob()).then(recordingText).then((text) => {
     // The dev server answers a missing file with this page instead of an error
     if (text.trimStart().startsWith("<")) {
       $("drop").textContent = `${sessionPath} isn't there`;

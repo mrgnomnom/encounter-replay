@@ -6,13 +6,15 @@
  *   npx vite-node scripts/parity.ts sessions/tfa.jsonl [more sessions...]
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { unzlibSync } from "fflate";
 import { forJava, java } from "../exportServer";
 import { buildBundle } from "../src/cache/build/buildBundle";
 import { nodeSource } from "../src/cache/store/nodeSource";
 import { CacheStore } from "../src/cache/store/store";
+import { readRecordingSync } from "./recordingFile";
+import { withoutEnding } from "../src/packed";
 
 const ROOT = resolve(__dirname, "..");
 const BUILD = join(ROOT, "exporter", "build");
@@ -22,12 +24,15 @@ const JAVA = java();
 
 function javaExport(session: string): string {
   mkdirSync(OUT, { recursive: true });
-  const out = join(OUT, `${basename(session, ".jsonl")}.bundle.json`);
+  const out = join(OUT, `${withoutEnding(basename(session))}.bundle.json`);
   if (existsSync(out) && statSync(out).mtimeMs > statSync(join(CACHE, "main_file_cache.dat2")).mtimeMs && statSync(out).mtimeMs > statSync(session).mtimeMs) return out;
   if (!JAVA) throw new Error("No Java found: set ENCOUNTER_JAVA");
   const win = (p: string) => forJava(p, JAVA);
   const cp = [join(BUILD, "classes", "java", "main"), join(BUILD, "deps", "*")].map(win).join(JAVA.endsWith(".exe") ? ";" : ":");
-  execFileSync(JAVA, ["-Xmx3g", "-cp", cp, "encounterreplay.Exporter", win(CACHE), win(session), win(out)], { stdio: "inherit" });
+  // The exporter reads plain JSON lines: a packed recording is unpacked next to its bundle first
+  const plain = session.endsWith(".gz") ? join(OUT, `${withoutEnding(basename(session))}.jsonl`) : session;
+  if (plain !== session) writeFileSync(plain, readRecordingSync(session));
+  execFileSync(JAVA, ["-Xmx3g", "-cp", cp, "encounterreplay.Exporter", win(CACHE), win(plain), win(out)], { stdio: "inherit" });
   return out;
 }
 
@@ -144,7 +149,7 @@ for (const session of process.argv.slice(2).map((s) => resolve(s))) {
   diffs.clear();
   const reference = JSON.parse(readFileSync(javaExport(session), "utf8"));
   const started = Date.now();
-  const built = await buildBundle(store, readFileSync(session, "utf8"));
+  const built = await buildBundle(store, readRecordingSync(session));
   const took = Date.now() - started;
   // Built from the same cache, the TS bundle should match except for its notes
   compare("bundle", reference, JSON.parse(JSON.stringify(built)));

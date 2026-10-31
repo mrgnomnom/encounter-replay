@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { exportServer } from "./exportServer";
+import { RECORDING_NAME, ticksFromHeader } from "./src/packed";
 import { sortRecordings, TAIL_BYTES, ticksFromTail } from "./src/recordingList";
 
 /**
@@ -18,20 +19,25 @@ function sessionsFolder(): string | undefined {
   return candidates.find((dir): dir is string => !!dir && existsSync(dir));
 }
 
-/** Lists the recorder's sessions at /recordings and serves them at /recordings/<file> */
-/** The end of a file, enough for its last line */
-function tail(path: string, size: number): string {
-  const length = Math.min(size, TAIL_BYTES);
+/** Part of a file: its end, enough for its last line, or its start, enough for a gzip header */
+function slice(path: string, size: number, length: number, fromEnd: boolean): Buffer {
+  length = Math.min(size, length);
   const buffer = Buffer.alloc(length);
   const fd = openSync(path, "r");
   try {
-    readSync(fd, buffer, 0, length, size - length);
+    readSync(fd, buffer, 0, length, fromEnd ? size - length : 0);
   } finally {
     closeSync(fd);
   }
-  return buffer.toString("utf8");
+  return buffer;
 }
 
+/** A recording's length: from its gzip header once packed, or else its last line */
+function ticksOf(path: string, size: number): number | undefined {
+  return path.endsWith(".gz") ? ticksFromHeader(slice(path, size, 512, false)) : ticksFromTail(slice(path, size, TAIL_BYTES, true).toString("utf8"));
+}
+
+/** Lists the recorder's sessions at /recordings and serves them at /recordings/<file> */
 function recordings(): Plugin {
   return {
     name: "encounter-recordings",
@@ -46,10 +52,10 @@ function recordings(): Plugin {
         }
         if (!name) {
           const files = sortRecordings(readdirSync(dir)
-            .filter((f) => f.endsWith(".jsonl"))
+            .filter((f) => RECORDING_NAME.test(f))
             .map((f) => {
               const s = statSync(join(dir, f));
-              return { name: f, size: s.size, modified: s.mtimeMs, ticks: ticksFromTail(tail(join(dir, f), s.size)) };
+              return { name: f, size: s.size, modified: s.mtimeMs, ticks: ticksOf(join(dir, f), s.size) };
             }));
           res.setHeader("Content-Type", "application/json");
           // The same folder as Windows names it, for pasting into a file dialog
@@ -59,12 +65,12 @@ function recordings(): Plugin {
           return;
         }
         // Only plain file names from that folder
-        if (!/^[\w.-]+\.jsonl$/.test(name) || !existsSync(join(dir, name))) {
+        if (!RECORDING_NAME.test(name) || !existsSync(join(dir, name))) {
           res.statusCode = 404;
           res.end("Not found");
           return;
         }
-        res.setHeader("Content-Type", "application/x-ndjson");
+        res.setHeader("Content-Type", name.endsWith(".gz") ? "application/gzip" : "application/x-ndjson");
         createReadStream(join(dir, name)).pipe(res);
       });
     },

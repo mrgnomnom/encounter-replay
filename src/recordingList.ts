@@ -1,3 +1,5 @@
+import { withoutEnding } from "./packed";
+
 /**
  * Recordings as the recorder's panel lists them: by the name they were given (the file's time stamp left
  * off, hyphens back to spaces, a repeated name's number as "TFA-1"), newest first. Here each also gets its
@@ -12,15 +14,15 @@ export interface RecordingFile {
   ticks?: number;
 }
 
-// yyyyMMdd-HHmmss-<name>.jsonl, as the recorder names files
-const FILE = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(.*)\.jsonl$/;
+// yyyyMMdd-HHmmss-<name>.jsonl, as the recorder names files, and .jsonl.gz once it has packed them
+const FILE = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(.*?)\.jsonl(?:\.gz)?$/;
 // A repeated name's number: "TFA_1" in the file, shown as "TFA-1" (names never hold "_")
 const COUNTED = /^(.*)_(\d+)$/;
 
 /** The name a recording was given, as the plugin's panel shows it */
 export function shownName(fileName: string): string {
   const m = FILE.exec(fileName);
-  if (!m) return fileName.replace(/\.jsonl$/i, "");
+  if (!m) return withoutEnding(fileName);
   const label = m[7];
   if (!label) return "session";
   const counted = COUNTED.exec(label);

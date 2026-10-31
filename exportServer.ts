@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 import type { Plugin } from "vite";
+import { RECORDING_NAME, withoutEnding } from "./src/packed";
 
 /**
  * Exports a recording's models on demand: POST /export/<file> runs the exporter against a copy of the
@@ -59,16 +61,26 @@ export function exportServer(sessionsFolder: () => string | undefined, home: str
           res.end(JSON.stringify(body));
         };
         const dir = sessionsFolder();
-        if (req.method !== "POST" || !/^[\w.-]+\.jsonl$/.test(name) || !dir || !existsSync(join(dir, name))) return reply(404, { error: "No such recording" });
+        if (req.method !== "POST" || !RECORDING_NAME.test(name) || !dir || !existsSync(join(dir, name))) return reply(404, { error: "No such recording" });
         let job = running.get(name);
         if (!job) {
-          job = runExport(join(dir, name), name.replace(/\.jsonl$/, ""), home).finally(() => running.delete(name));
+          job = runExport(plainCopy(join(dir, name)), withoutEnding(name), home).finally(() => running.delete(name));
           running.set(name, job);
         }
         job.then((log) => reply(200, { ok: true, log })).catch((e: Error) => reply(500, { error: e.message }));
       });
     },
   };
+}
+
+/** The exporter reads plain JSON lines: a packed recording is unpacked next to it first */
+function plainCopy(session: string): string {
+  if (!session.endsWith(".gz")) return session;
+  const dir = join(EXPORTER, "build", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const plain = join(dir, withoutEnding(session.split("/").pop()!) + ".jsonl");
+  writeFileSync(plain, gunzipSync(readFileSync(session)));
+  return plain;
 }
 
 async function runExport(session: string, base: string, home: string): Promise<string> {

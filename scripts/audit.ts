@@ -14,6 +14,8 @@ import { clickOutcomes } from "../src/outcomes";
 import { EffectLinks } from "../src/links";
 import { lengthOf } from "../src/cache/models";
 import { Session, type Line } from "../src/session";
+import { readRecordingSync } from "./recordingFile";
+import { withoutEnding } from "../src/packed";
 
 type Level = "PASS" | "WARN" | "FAIL" | "INFO";
 const results: { level: Level; check: string; detail: string }[] = [];
@@ -24,8 +26,8 @@ if (!sessionPath) {
   console.error("Usage: npm run audit -- sessions/<name>.jsonl [bundle.json]");
   process.exit(2);
 }
-const bundlePath = process.argv[3] ?? `assets/cache/${basename(sessionPath, ".jsonl")}.bundle.json`;
-const session = Session.parse(readFileSync(sessionPath, "utf8"));
+const bundlePath = process.argv[3] ?? `assets/cache/${withoutEnding(basename(sessionPath))}.bundle.json`;
+const session = Session.parse(readRecordingSync(sessionPath));
 if (!existsSync(bundlePath)) {
   console.error(`No bundle at ${bundlePath}: export one first (see README, "Game models")`);
   process.exit(2);

@@ -1,4 +1,6 @@
 import type { Notes } from "./notes";
+import { pack } from "./packed";
+import { ticksFromTail } from "./recordingList";
 import type { Line } from "./session";
 
 /**
@@ -164,11 +166,12 @@ export class NotesUi {
     const hideLabel = el("label", "", "export-option");
     hideLabel.append(hide, " Hide player names ", el("span", "(yours becomes “You”, others “Player 1”, “Player 2”…)", "muted"));
     const notes = this.notes.between(from, to).length;
-    const download = el("button", "Download .jsonl", "primary");
-    download.onclick = () => {
+    const download = el("button", "Download", "primary");
+    download.onclick = async () => {
       const text = this.notes.exportText({ from, to, hideNames: hide.checked });
-      const name = `${this.hooks.baseName()}${zoomed ? `-ticks-${from}-${to}` : ""}.jsonl`;
-      const url = URL.createObjectURL(new Blob([text], { type: "application/x-ndjson" }));
+      // Packed as the recorder packs recordings: about 18 times smaller, small enough to post anywhere
+      const name = `${this.hooks.baseName()}${zoomed ? `-ticks-${from}-${to}` : ""}.jsonl.gz`;
+      const url = URL.createObjectURL(await pack(text, ticksFromTail(text.slice(-8192))));
       const a = el("a");
       a.href = url;
       a.download = name;
