@@ -23,8 +23,10 @@ const PRAYER_INTERFACE = 541;
 const INVENTORY_INTERFACE = 149;
 // A press this close to a button is a miss aimed at it; further away it was meant for something else
 const MISS_RADIUS_PX = 12;
-// A press and the click it produced arrive within a few cycles of each other
+// Most clicks arrive the cycle after their press, at about the same spot
 const SAME_CLICK_CYCLES = 3;
+// Inventory clicks only arrive when the button comes up, by when the mouse may have moved off the slot
+const RELEASE_CYCLES = 50;
 
 type Rect = [number, number, number, number];
 
@@ -40,21 +42,53 @@ export function clickPoints(session: Session): ClickPoint[] {
   for (const c of clicks) {
     if (c.widget?.[0] === PRAYER_INTERFACE && c.target) prayerOf.set(c.widget[1], String(c.target).toUpperCase().replace(/ /g, "_"));
   }
+  const presses = session.lines.filter((l) => l.e === "press" && l.button === 1);
+  const pressOf = pairPresses(clicks, presses);
   const points: ClickPoint[] = [];
   for (const c of clicks) {
     if (!c.wb || c.mx == null) continue;
     const button = buttonOf(c);
-    if (button) points.push({ button, ...relative(c.mx, c.my, c.wb), hit: true, t: c.t, c: c.c });
+    const press = pressOf.get(c);
+    // Where you pressed, not where the mouse had got to by the time the click arrived
+    const at = press && distance(press.mx, press.my, c.wb) === 0 ? press : c;
+    if (button) points.push({ button, ...relative(at.mx, at.my, c.wb), hit: true, t: c.t, c: c.c });
   }
-  for (const p of session.lines) {
-    if (p.e !== "press" || p.button !== 1) continue;
-    const produced = clicks.some((c) => Math.abs(c.c - p.c) <= SAME_CLICK_CYCLES && c.mx === p.mx && c.my === p.my && c.option !== "Cancel");
-    if (produced) continue;
+  const produced = new Set(pressOf.values());
+  for (const p of presses) {
+    if (produced.has(p)) continue;
     const layout = latestAtOrBefore(layouts, p.t);
     const near = layout && nearestButton(layout, p.mx, p.my, prayerOf);
     if (near) points.push({ button: near.button, ...relative(p.mx, p.my, near.rect), hit: false, t: p.t, c: p.c });
   }
   return points;
+}
+
+/**
+ * The press behind each click, each press making one click: the latest free one on the clicked button,
+ * or failing that one just before the click. A "Cancel" did nothing, so its press stays free
+ */
+function pairPresses(clicks: Line[], presses: Line[]): Map<Line, Line> {
+  const pressOf = new Map<Line, Line>();
+  const taken = new Set<Line>();
+  let after = 0;
+  for (const c of clicks) {
+    while (after < presses.length && presses[after].c <= c.c) after++;
+    if (c.option === "Cancel") continue;
+    let onButton: Line | undefined;
+    let justBefore: Line | undefined;
+    for (let i = after - 1; i >= 0 && c.c - presses[i].c <= RELEASE_CYCLES && !onButton; i--) {
+      const p = presses[i];
+      if (taken.has(p)) continue;
+      if (c.wb && distance(p.mx, p.my, c.wb) === 0) onButton = p;
+      else if (c.c - p.c <= SAME_CLICK_CYCLES) justBefore ??= p;
+    }
+    const press = onButton ?? justBefore;
+    if (press) {
+      taken.add(press);
+      pressOf.set(c, press);
+    }
+  }
+  return pressOf;
 }
 
 function buttonOf(c: Line): string | undefined {
