@@ -255,24 +255,24 @@ export class ObjectLoader {
       def.isHollow = true;
     } else if (opcode === 75) {
       def.supportsItems = is.readUnsignedByte();
-    } else if (opcode === 77 || opcode === 92) {
+    } else if (opcode === 77 || opcode === 92 || ((opcode === 97 || opcode === 98) && this.rev220SoundData)) {
+      // 97 and 98 (cache of 2026-11-04) are 77 and 92 with 24-bit object ids, 0xffffff for none. RuneLite's
+      // library (1.13.4) predates them; older-revision archives can't hold them, so they stay unknown there
+      const wide = opcode >= 97;
+      const objectId = (): number => {
+        const v = wide ? is.read24BitInt() : is.readUnsignedShort();
+        return v === (wide ? 0xffffff : 0xffff) ? -1 : v;
+      };
       let varpID = is.readUnsignedShort();
       if (varpID === 0xffff) varpID = -1;
       def.varbitID = varpID;
       let configId = is.readUnsignedShort();
       if (configId === 0xffff) configId = -1;
       def.varpID = configId;
-      let last = -1;
-      if (opcode === 92) {
-        last = is.readUnsignedShort();
-        if (last === 0xffff) last = -1;
-      }
+      const last = opcode === 92 || opcode === 98 ? objectId() : -1;
       const length = is.readUnsignedByte();
       const configChangeDest = new Array<number>(length + 2).fill(0);
-      for (let index = 0; index <= length; ++index) {
-        configChangeDest[index] = is.readUnsignedShort();
-        if (configChangeDest[index] === 0xffff) configChangeDest[index] = -1;
-      }
+      for (let index = 0; index <= length; ++index) configChangeDest[index] = objectId();
       configChangeDest[length + 1] = last;
       def.configChangeDest = configChangeDest;
     } else if (opcode === 78) {
